@@ -2,3 +2,7 @@
 *.mat
 .DS_Store
 __pycache__/
+
+# 原始 MATLAB 程式碼資料夾，作為盤點和 port 的「原料庫」
+# 不入 Git，避免 repo 膨脹。Canonical 版本會在使用者決策後複製到 matlab_ref/
+source_code/
