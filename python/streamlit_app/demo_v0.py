@@ -17,8 +17,10 @@ if str(_python_dir) not in sys.path:
 import numpy as np
 import plotly.express as px
 import streamlit as st
+from PIL import Image
 from scipy.sparse import issparse
 
+from gaussian_blur import gaussian_blur
 from tensor_utils import (
     sp_Jaco_Ax,
     sp_tendiag,
@@ -205,6 +207,57 @@ def render_sp_Jaco_Ax() -> None:
         st.code(read_snippet("sp_Jaco_Ax"), language="matlab")
 
 
+def _make_sample_image(n: int = 128) -> np.ndarray:
+    """128x128 灰階合成測試圖：有銳利邊緣 + 內部方塊 + 隨機黑點，模糊起來明顯。"""
+    img = np.full((n, n), 0.9, dtype=float)
+    img[n // 4 : 3 * n // 4, n // 4 : 3 * n // 4] = 0.1        # 中央黑方塊
+    img[3 * n // 8 : 5 * n // 8, 3 * n // 8 : 5 * n // 8] = 0.9  # 內部白方塊
+    rng = np.random.default_rng(42)
+    for _ in range(30):
+        i, j = int(rng.integers(0, n)), int(rng.integers(0, n))
+        img[i, j] = 0.0
+    return img
+
+
+def render_gaussian_blur() -> None:
+    st.header("gaussian_blur(A, sigma)")
+    st.caption(
+        "2-D 高斯模糊（用 `matlab_compat=True` 對應 MATLAB `conv2` 的零填充 + `ceil(3σ)` 截斷）。"
+    )
+
+    uploaded = st.file_uploader(
+        "上傳灰階圖片（可選；不上傳就用內建範例）",
+        type=["png", "jpg", "jpeg"],
+    )
+    if uploaded is not None:
+        img = np.asarray(Image.open(uploaded).convert("L"), dtype=float) / 255.0
+    else:
+        img = _make_sample_image()
+
+    sigma = st.slider("sigma (模糊半徑)", 0.5, 5.0, 1.5, step=0.1)
+
+    blurred = gaussian_blur(img, sigma, matlab_compat=True)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("Original")
+        st.image(img, width="stretch", clamp=True)
+        st.caption(
+            f"shape: {img.shape}, dtype: {img.dtype}, "
+            f"min/max: {float(img.min()):.3f} / {float(img.max()):.3f}"
+        )
+    with col2:
+        st.subheader(f"Blurred (σ={sigma})")
+        st.image(blurred, width="stretch", clamp=True)
+        st.caption(
+            f"shape: {blurred.shape}, dtype: {blurred.dtype}, "
+            f"min/max: {float(blurred.min()):.3f} / {float(blurred.max()):.3f}"
+        )
+
+    with st.expander("📄 對應的 MATLAB 原始碼"):
+        st.code(read_snippet("gaussian_blur"), language="matlab")
+
+
 # ========================================================================
 # Dispatch — this dict is the v0 forward-compat contract.
 # Adding a new ported function = add one renderer + one line here.
@@ -216,6 +269,7 @@ RENDERERS = {
     "sp_tendiag": render_sp_tendiag,
     "ten2mat": render_ten2mat,
     "sp_Jaco_Ax": render_sp_Jaco_Ax,
+    "gaussian_blur": render_gaussian_blur,
 }
 
 
