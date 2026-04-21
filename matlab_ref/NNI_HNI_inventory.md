@@ -367,3 +367,128 @@ Nonnegative tensor/
 4. **先寫一份精簡的 MATLAB→Python 張量運算對照表**（`reshape`, `kron`, `find`, slicing 等）當作 port 開工前的 reference，避免每次重查。
 
 以上僅是建議，等你確認下一步再動手。這份盤點報告的目的是讓你能下決策，不是我幫你下決策。
+
+---
+
+## Section H: NNI canonical 選擇決策
+
+> **寫在前面（caveats）**：這一節是另一個 Explore agent 對 `Nonnegative tensor/` 底下 10 個版本資料夾的比對結果，比我第一輪盤點做得更徹底。兩個數據可靠性提醒：
+>
+> 1. **mtime 可能被 Google Drive 同步重寫**。如果某個時間戳看起來突兀（例如 ver8.0 是 2023 年、其他都在 2016），先把它當線索而不是鐵證，跟你自己記憶中的開發時間對照一下。
+> 2. **同名檔的實際差異沒做逐字 diff**，只比了行數。行數一致不代表內容一致，行數不同代表一定有改。正式選定 canonical 後可以再做一次字元級 diff。
+
+### H.1 版本 metadata 表
+
+| 資料夾 | 頂層 `.m` 檔數 | 最近修改 | 主入口 script | 主演算法檔 | 主演算法行數 |
+|---|---|---|---|---|---|
+| `tensor_packege_ver2` | 0（含巢狀子目錄 12 檔） | 2015-01-20 | 無頂層 driver | `NLI.m`（於 `eigen_solve/`） | 128 |
+| `tensor_packege_ver3` | 10 | 2015-06-12 | `main.m` | `LENT.m` / `NLI.m` | 61 / 128 |
+| `tensor_packege_ver4` | 11 | 2016-01-27 | `main.m` | `LENT.m` / `NLI.m` | 111 / 132 |
+| `tensor_packege_ver5` | 25 | 2016-04-27 | `main.m` | **`NNI.m`**（首次出現） | 141 |
+| `tensor_packege_ver5.1` | 16 | 2016-05-20 | `main.m` | **`NNI.m`** | 188 |
+| `tensor_packege_ver7.1` | 23 | 2016-03-20 ⚠️ | `main.m` | **`NNI.m`** / `NNI_M.m` | 146 |
+| `tensor_packege_ver7.3` | 42 | 2016-06-09 | `main.m` | **`NNI.m`** / `NNI_2.m` / `NNI_3.m` | 145 |
+| `tensor_packege_ver8.0` | 24 | **2023-09-05** ⚠️ | `main.m` | **`NNI.m`** | 269 |
+| `H_eigenpair_ver6` | 18 | 2016-02-09 | `main.m` | **`NNI.m`** | 141 |
+| `NLI_2015` | 4 | 2015-06-08 | `test_tensor.m` | `NLI_2015.m` | 137 |
+
+⚠️ **異常時間戳**：
+- `ver7.1` mtime（2016-03-20）居然**比 `ver5.1`（2016-05-20）早**。可能是：(a) 平行開發分支，(b) 版本號不是嚴格按時序、(c) Google Drive 同步把 mtime 重寫了。你自己比較清楚實際開發順序。
+- `ver8.0` 是唯一一個 2023 年檔案，跟其他全部 2015-2016 的版本中間隔了 7 年。如果你記得 2023 有特別動過這包，那可能是真的；不然就可能是同步時間戳。
+
+### H.2 tensor_packege 版本演進
+
+#### ver2 → ver3（2015 初 → 2015-06）
+- **新增**：`main.m`、`ten2mat.m`、`teneye.m`、`tengen.m`、`tenrand.m`、`tpv.m`（工具函式）、`NLI_2015.m`
+- **移除**：無
+- **一句話**：從巢狀子目錄結構扁平化到頂層，`LENT.m`（61 行）首次獨立出現，`NLI.m` 穩定於 128 行
+
+#### ver3 → ver4（2015-06 → 2016-01）
+- **新增**：`main_2.m`、`main_table.m`
+- **移除**：`NLI_2015.m`（抽出獨立成 `NLI_2015/` 資料夾）
+- **行數變化**：`LENT.m` 61 → 111（+50，實質擴充）；`NLI.m` 128 → 132（微調）
+- **一句話**：`LENT` 大幅擴展（可能加線性 solver 或收斂控制）；`NLI_2015` 被封存到獨立資料夾
+
+#### ver4 → ver5（2016-01 → 2016-04）⚡ **典範轉移**
+- **新增**：**`NNI.m`（141 行，首次出現）**、`NNI2.m`、`NNI_sp.m`、`NNI_test.m`、`LENT2.m`、`error_check.m`、`test.m`、多個 `main_*.m`、多個 `tengen*.m`、`tpv_multi.m`、`Untitled*.m`
+- **移除**：`NLI.m`、`main_2.m`、`main_table.m`
+- **一句話**：**NLI 被 NNI 取代，典範轉移**；ver5 充滿實驗與 `Untitled*.m` 遺留檔
+
+#### ver5 → ver5.1（2016-04 → 2016-05）⚡ **清理版**
+- **新增**：無
+- **移除**：`LENT2.m`、`NNI2.m`、`NNI_test.m`、`tengen2/3.m`、`tpv_multi.m`、`Untitled*.m`（約 9 個實驗檔）
+- **行數變化**：`NNI.m` 141 → **188**（+47，重大升級）；`LENT.m` 114 → 124
+- **一句話**：把 ver5 的實驗垃圾清掉，`NNI.m` 完整化（header 出現 `norm(x,m-1)` 這類成熟計算）
+
+#### ver5.1 → ver7.1（時間上逆序 ⚠️）
+- **新增**：`NNI_M.m`、`main_M_sparse.m`、`main_Mtensor.m`、`tendiag.m`、`tendiag_sparse.m`、`tengen_sparse.m`、`sp_tendiag.m`、`prob_matgen.m`、`prob_matgen2.m`
+- **移除**：`main_sp.m`、`NNI_sp.m`、`tengen_2016.m`、`tengen_D.m`
+- **行數變化**：`NNI.m` 188 → **146**（**-42，簡化！**）；`LENT.m` 124 → 111
+- **一句話**：引入 M-matrix 與 sparse tensor 分支；`NNI.m` 被**重構精簡**（行數減功能增）；時間戳逆序表示很可能是平行分支
+
+#### ver7.1 → ver7.3（2016-03 → 2016-06）⚡ **實驗叢集**
+- **新增**：NNI 變體大爆發：`NNI_51.m`、`NNI_2.m`、`NNI_3.m`；sparse 版：`sp_NNI.m`、`sp_NNI_M.m`、`sp_NNIrand.m`；多個 `tengen_*.m`（含 `tengen_tridiagonal.m`）；多個 `main_sp*.m`；`LENT0.m`；`geM.m`；又冒出 `Untitled*.m`
+- **移除**：`main_M_sparse.m`、`tendiag_sparse.m`、`tengen_sparse.m`（被 `sp_*` 家族取代）
+- **行數變化**：`NNI.m` 146 → 145（幾乎不變）；`LENT.m` 111 → 124
+- **一句話**：演算法變體實驗期，NNI 分支出 `_51` / `_2` / `_3` 並行；42 個 `.m` 檔是歷來最多，代碼複雜度峰值
+
+#### ver7.3 → ver8.0（2016-06 → **2023-09**，7 年鴻溝）⚡ **大重構**
+- **新增**：應用導向檔案（`main_6D.m`、`main_ex1.m`、`main_ex5.m`、`main_freeway.m`、`main_high*.m`）；NNI 變體 `NNI_hav.m`、`NNI_theta.m`；新的 `tengen_3D/4D/5D/6D/HD*.m` 家族；`NQZ.m`、`R_63.m`
+- **移除**：**`LENT.m`、`LENT0.m`（完全棄用）**、`error_check.m`、`main_gamma.m`、`main_Mtensor.m`、所有 `main_sp*.m`、`tendiag.m`、所有 `sp_*` 家族
+- **行數變化**：`NNI.m` 145 → **269**（+124，大幅擴展，支援高維 + 多種 tengen）
+- **一句話**：**棄用 LENT、重寫 NNI、增加 3D/4D/5D/6D/HD 多維度 support**，進入應用驗證階段；7 年沉默後的重啟意味這是最新生產版本 —— **但前提是 mtime 可信**
+
+#### 為何沒有 ver6 / ver7 純版本？
+
+- **沒有 `ver6`**：很可能 `H_eigenpair_ver6/`（2016-02-09，位在 `ver5.1` 與 `ver7.1` 之間）就是當時的 ver6 分支，為 H-eigenpair / 超圖特殊應用開發，沒有回流成 `tensor_packege_ver6`
+- **沒有 `ver7`（只有 `ver7.1` / `ver7.3`）**：`ver7.0` 可能是內部中間態未公開
+
+### H.3 `H_eigenpair_ver6` 與 `NLI_2015` 的關係
+
+#### `H_eigenpair_ver6` = tensor_packege ver5 系列的應用分支
+- mtime 2016-02-09（介於 ver5.1 之前不久）
+- 與 `ver5.1` 檔案清單重疊度 12/16 ≈ 75%；與 `ver7.1` 重疊 14/18 ≈ 78%
+- 獨有檔：`main_probility.m`、`prob_matgen.m`（概率矩陣生成）、`wind.m`（看名字像風場應用）
+- 主演算法 `NNI.m` 141 行（跟 `ver5` 一字不差的行數）；`LENT.m` 114 行（跟 `ver5.1` 同）
+- **結論**：這不是 tensor_packege 主序列的 ver6，而是針對**超圖 / H-eigenpair 特定應用場景**從 `ver5` 分支出來的應用套件
+
+#### `NLI_2015` = NLI 演算法的歷史快照
+- mtime 2015-06-08，與 `ver3` 同期
+- 4 個檔：`NLI_2014_ver1.m`、`NLI_2014_ver2.m`、`NLI_2015.m`、`test_tensor.m`
+- `NLI_2015.m` 在 tensor_packege ver3 也出現過，之後 ver4 移出、ver5 徹底被 NNI 取代
+- **結論**：NLI 演算法的**投稿期快照**（2014-2015），是 NNI 登場前的前代演算法；保留為獨立資料夾應該是為了保存論文對應版
+
+### H.4 Canonical 候選（三種解釋）
+
+#### 1. 「最新版」候選 → `tensor_packege_ver8.0`
+唯一 2023 年檔案，`NNI.m` 行數最多（269），有最豐富的 3D/4D/5D/6D/HD 多維度支援與應用案例。**但有兩個 caveat**：
+- **棄用 LENT**：如果你目前的研究還需要跟 LENT 對照 / 做 baseline，這個版本不適合
+- **mtime 可能不可信**：先確認 2023-09 那次你真的有動過這包，不是同步時間戳
+
+#### 2. 「穩定版」候選 → `tensor_packege_ver5.1`
+- 繼承 ver5 的 NNI 但清掉所有 `Untitled*.m` 和 `*_test.m` 實驗檔
+- 檔案命名一致（沒有 `sp_` / `_M` 前綴混亂、沒有 `NNI_51` / `NNI_2` / `NNI_3` 多變體）
+- `NNI.m` 188 行：完整但不膨脹
+- 版本號 `5.1` 本身就是「微調收尾」的語意
+- 避開了 `ver7.3` 的實驗叢集和 `ver8.0` 的 7 年斷層
+- **適合作為「穩定 port 起點」的版本**
+
+#### 3. 「論文對應版」候選 → 需要你提供論文時間
+無檔案內部註記、無 author / 投稿 tag 可自動辨識。依照演算法的時代推斷：
+- 若你的 NNI 論文**投稿於 2016**：最可能對應 `ver5.1`（2016-05，穩定）或 `ver7.1`（2016-03，M-matrix 擴展）
+- 若你的 NLI 論文**發表於 2015**：對應 `NLI_2015/NLI_2015.m`
+- 若是 2023 年之後的新論文：對應 `ver8.0`（如果 mtime 可信）
+
+**需要你告訴我論文年份**，我才能做進一步推斷。
+
+---
+
+**總結表**
+
+| 解釋 | 候選 | 關鍵選擇理由 | 最大 caveat |
+|---|---|---|---|
+| 最新 | `ver8.0` | 唯一 2023、NNI 最完整、多維度支援 | 棄用 LENT、mtime 需驗證 |
+| 穩定 | `ver5.1` | code 乾淨、命名一致、ver 號設定為微調版 | 缺少 M-matrix 與多維擴展 |
+| 論文對應 | 未定 | 需使用者提供論文年份 | — |
+
+**我自己不做最終選擇。以上是三個候選，等你指定。**
