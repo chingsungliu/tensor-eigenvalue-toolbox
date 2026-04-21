@@ -3,7 +3,7 @@
 import numpy as np
 from scipy.sparse import csr_matrix, issparse
 
-from tensor_utils import tenpow, tpv, sp_tendiag, ten2mat
+from tensor_utils import tenpow, tpv, sp_tendiag, ten2mat, sp_Jaco_Ax
 
 
 def test_tenpow_basic():
@@ -316,8 +316,111 @@ def test_ten2mat_basic():
     print("test_ten2mat_basic passed")
 
 
+def test_sp_Jaco_Ax_basic():
+    #
+    # --- (1) m=1 邊界：F(x) 是常數，Jacobian = 0 矩陣 (n, n) ---
+    #
+    x = np.array([1.0, 2.0, 3.0])
+    AA = np.ones((3, 1))  # shape (n, n^0) = (n, 1) for m=1
+    J = sp_Jaco_Ax(AA, x, 1)
+    assert issparse(J)
+    assert J.shape == (3, 3)
+    assert J.nnz == 0
+
+    #
+    # --- (2) m=2 case：F(x) = AA @ x，故 dF/dx = AA ---
+    #
+    AA = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]])
+    x = np.array([2.0, 3.0, 5.0])
+    J = sp_Jaco_Ax(AA, x, 2)
+    Jd = J.toarray() if issparse(J) else np.asarray(J)
+    assert Jd.shape == (3, 3)
+    assert np.allclose(Jd, AA), f"m=2 Jacobian should equal AA, got {Jd}"
+
+    #
+    # --- (3) m=3 手算：J = AA @ (kron(I, x) + kron(x, I)) ---
+    #
+    AA = np.array([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]])  # (2, 4)
+    x = np.array([2.0, 3.0])
+    J = sp_Jaco_Ax(AA, x, 3)
+    Jd = J.toarray() if issparse(J) else np.asarray(J)
+    I = np.eye(2)
+    x_col = x.reshape(-1, 1)
+    expected_kron_sum = np.kron(I, x_col) + np.kron(x_col, I)
+    expected_J = AA @ expected_kron_sum
+    assert np.allclose(Jd, expected_J), (
+        f"m=3 Jacobian mismatch:\n  got {Jd}\n  expected {expected_J}"
+    )
+
+    #
+    # --- (4) Linearity in AA: J(c * AA) = c * J(AA) ---
+    #
+    rng = np.random.default_rng(123)
+    AA_r = rng.standard_normal((3, 9))
+    x_r = rng.standard_normal(3)
+    Ja = sp_Jaco_Ax(AA_r, x_r, 3)
+    Jb = sp_Jaco_Ax(2.5 * AA_r, x_r, 3)
+    Jad = Ja.toarray() if issparse(Ja) else np.asarray(Ja)
+    Jbd = Jb.toarray() if issparse(Jb) else np.asarray(Jb)
+    assert np.allclose(Jbd, 2.5 * Jad), "Linearity in AA failed"
+
+    #
+    # --- (5) Sparse vs dense AA input 結果一致 ---
+    #
+    AA_d = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]])
+    AA_s = csr_matrix(AA_d)
+    x = np.array([1.0, 2.0, 3.0])
+    J_d = sp_Jaco_Ax(AA_d, x, 2)
+    J_s = sp_Jaco_Ax(AA_s, x, 2)
+    J_dd = J_d.toarray() if issparse(J_d) else np.asarray(J_d)
+    J_sd = J_s.toarray() if issparse(J_s) else np.asarray(J_s)
+    assert np.allclose(J_dd, J_sd), "dense vs sparse AA input gave different J"
+
+    #
+    # --- (6) 輸入驗證 ---
+    #
+    raised = False
+    try:
+        sp_Jaco_Ax(np.ones(5), np.ones(5), 2)  # 1-D AA
+    except ValueError as e:
+        raised = True
+        assert "2-D" in str(e)
+    assert raised, "1-D AA should raise"
+
+    raised = False
+    try:
+        sp_Jaco_Ax(np.ones((3, 9)), np.array([[1.0, 2.0, 3.0]]), 3)  # 2-D x
+    except ValueError as e:
+        raised = True
+        assert "1-D" in str(e)
+    assert raised, "2-D x should raise"
+
+    raised = False
+    try:
+        sp_Jaco_Ax(np.ones((3, 3)), np.ones(3), 0)  # m = 0
+    except ValueError as e:
+        raised = True
+        assert ">= 1" in str(e)
+    assert raised, "m=0 should raise"
+
+    #
+    # --- (7) matlab_compat no-op ---
+    #
+    rng = np.random.default_rng(456)
+    AA = rng.standard_normal((3, 9))
+    x = np.array([1.5, 2.5, 3.5])
+    Ja = sp_Jaco_Ax(AA, x, 3, matlab_compat=False)
+    Jb = sp_Jaco_Ax(AA, x, 3, matlab_compat=True)
+    Jad = Ja.toarray() if issparse(Ja) else np.asarray(Ja)
+    Jbd = Jb.toarray() if issparse(Jb) else np.asarray(Jb)
+    assert np.allclose(Jad, Jbd)
+
+    print("test_sp_Jaco_Ax_basic passed")
+
+
 if __name__ == "__main__":
     test_tenpow_basic()
     test_tpv_basic()
     test_sp_tendiag_basic()
     test_ten2mat_basic()
+    test_sp_Jaco_Ax_basic()

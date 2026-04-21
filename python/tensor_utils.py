@@ -10,7 +10,12 @@
   `order='F'`，匹配 MATLAB 的欄優先儲存。
 """
 import numpy as np
-from scipy.sparse import csr_matrix, issparse
+from scipy.sparse import (
+    csr_matrix,
+    eye as sp_eye,
+    issparse,
+    kron as sp_kron,
+)
 
 
 def tenpow(x, p, matlab_compat=False):
@@ -97,7 +102,7 @@ def tpv(AA, x, m, matlab_compat=False):
     m : int
         Tensor order；會用來算 Kronecker 次方 `x^(m-1)`。必須 `m >= 1`。
         注意這個 `m` 是 tensor order（跟 HNI 的 m 同義），**不是** tenpow
-        的 `p`；本函式內部做 `tenpow(x, m - 1)`，把 tensor order 換成
+        的 `p`;本函式內部做 `tenpow(x, m - 1)`，把 tensor order 換成
         Kronecker 次方傳給 tenpow。
     matlab_compat : bool, default False
         **對 tpv 本身是 no-op** — 矩陣-向量乘法在 MATLAB 和 numpy 產生等價
@@ -212,7 +217,7 @@ def ten2mat(A, k=0, matlab_compat=False):
     ----------
     A : array-like
         m-order tensor，shape `(n_0, n_1, ..., n_{m-1})`。`m` 必須 `>= 1`。
-        dense ndarray；不支援 sparse（MATLAB 原碼也不支援）。
+        dense ndarray;不支援 sparse（MATLAB 原碼也不支援）。
     k : int, default 0
         展開的 mode index (0-based)，對應 MATLAB 原碼的 `k - 1`。必須
         `0 <= k < A.ndim`。HNI 實際使用時 k 永遠是 0（mode-1 unfolding），
@@ -288,3 +293,99 @@ def ten2mat(A, k=0, matlab_compat=False):
 
     # Column-major (Fortran) reshape — 見 Paper derivation 為何這一步必須 'F'。
     return A_moved.reshape(n_k, other, order="F")
+
+
+def sp_Jaco_Ax(AA, x, m, matlab_compat=False):
+    """計算 F(x) = AA · x^(m-1) 的 Jacobian `F'(x)`，回傳 scipy.sparse csr_matrix
+    of shape `(n, n)`。
+
+    對應 MATLAB reference：`matlab_ref/hni/Multi.m` 第 79-87 行。
+
+    數學公式（鏈鎖法則於 x^⊗p 的導數）：
+        F'(x) = AA · Σ_{i=1..p} (x^⊗(i-1) ⊗ I_n ⊗ x^⊗(p-i))
+    其中 p = m - 1。
+
+    常見極限情況的退化：
+    - `m = 1` (p=0)：空求和，F(x) = AA · 1 是常數，Jacobian = 0 matrix
+    - `m = 2` (p=1)：單項 `AA · (1 ⊗ I ⊗ 1) = AA · I = AA`（若 AA 為方陣）
+    - `m = 3` (p=2)：`AA · (kron(I, x) + kron(x, I))`，兩項
+
+    Parameters
+    ----------
+    AA : array-like or scipy.sparse matrix, 2-D
+        m-order n-dim tensor 的 mode-1 unfolding，shape `(n, n^(m-1))`。
+    x : array-like, 1-D
+        向量，shape `(n,)`。
+    m : int
+        Tensor order。必須 `m >= 1`。
+    matlab_compat : bool, default False
+        **對輸出無作用**（no-op）。保留以維持 API 一致性。本函式的核心
+        運算是 `scipy.sparse.kron` + sparse matmul — numpy 和 MATLAB 對
+        1-D Kronecker 的元素順序一致（見 tenpow 的 Trap #4 分析），sparse
+        matmul 也 layout-free，因此無須切換。
+
+    Returns
+    -------
+    scipy.sparse.csr_matrix
+        Shape `(n, n)` 的 Jacobian。即使 AA 是 dense ndarray，本函式也會
+        內部轉成 sparse 做運算、輸出 sparse（對應 MATLAB 原版的隱含 sparse
+        輸出：因為 I 是 sparse、kron 結果 sparse、再跟 AA 乘 scipy 保留
+        sparse 格式）。
+
+    四大陷阱在本函式的觸發分析
+    -------------------------
+    Trap #3 Indexing：⚠️ MATLAB `for i = 1:p` 的 `i-1` 和 `p-i` 是 exponent，
+        在 `[0, p-1]` 範圍。Python 我們保留相同的 1-based loop bound
+        `range(1, p + 1)`，讓 `i - 1` 和 `p - i` 這兩個 expression 跟
+        MATLAB 一字不差（不做 0-based 重編號）— 這樣程式碼長得像 MATLAB
+        原版，審校時可以逐行對照。
+    Trap #4 Column-major：**不觸發**。本函式純粹是 Kronecker algebra + sparse
+        matmul，沒有任何 `reshape`。唯一的 `reshape(-1, 1)` 是把 1-D `tenpow`
+        結果轉成 column vector 餵給 `scipy.sparse.kron`，這個 reshape 是 1-D
+        → 2-D column、layout 中立。
+
+        注意：這裡的 mode 順序 (x^⊗(i-1) ⊗ I ⊗ x^⊗(p-i)) 直接對應張量
+        unfolding 的 column-major 慣例 — 這個慣例已經烘焙進公式本身，不是
+        我們選的。逐字 port 公式即正確。
+    """
+    if not issparse(AA):
+        AA = np.asarray(AA)
+    if AA.ndim != 2:
+        raise ValueError(f"AA must be 2-D, got shape {AA.shape}")
+
+    x = np.asarray(x)
+    if x.ndim != 1:
+        raise ValueError(f"x must be 1-D, got shape {x.shape}")
+    if m < 1:
+        raise ValueError(f"m must be >= 1, got {m}")
+
+    n = len(x)
+    p = m - 1
+
+    # m=1 邊界：F(x) 是常數，Jacobian 是零矩陣 (n, n)
+    if p == 0:
+        return csr_matrix((n, n), dtype=x.dtype)
+
+    # 內部統一 sparse CSR 做運算，對應 MATLAB 的 `dense*sparse = sparse` 行為
+    AA_sp = AA.tocsr() if issparse(AA) else csr_matrix(AA)
+    I = sp_eye(n, format="csr")
+
+    J = csr_matrix((n, n), dtype=x.dtype)
+    for i in range(1, p + 1):
+        # i 保留 MATLAB 1-based 迴圈範圍，讓 `i - 1` 和 `p - i` 這兩個
+        # exponent expression 跟 MATLAB 原版一字不差、好審校。
+        left = tenpow(x, i - 1, matlab_compat=matlab_compat).reshape(-1, 1)  # (n^(i-1), 1)
+        right = tenpow(x, p - i, matlab_compat=matlab_compat).reshape(-1, 1)  # (n^(p-i), 1)
+
+        # kron(I (n,n), right (n^(p-i), 1)) → sparse (n^(p-i+1), n)
+        inner = sp_kron(I, right, format="csr")
+
+        # kron(left (n^(i-1), 1), inner (n^(p-i+1), n)) → sparse (n^p, n)
+        outer = sp_kron(left, inner, format="csr")
+
+        # AA_sp (n, n^p) @ outer (n^p, n) → sparse (n, n)
+        term = AA_sp @ outer
+
+        J = J + term
+
+    return J

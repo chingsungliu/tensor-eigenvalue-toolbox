@@ -161,14 +161,17 @@ Port iterative algorithm **不能只比最終輸出**，因為任何中間步驟
 | 1 | `tpv` | `tensor_utils.py::tpv` | `test_tpv_parity.py` | ~1e-16 | ✓ 完成 |
 | 1 | `sp_tendiag` | `tensor_utils.py::sp_tendiag` | `test_sp_tendiag_parity.py` | **0** | ✓ 完成 |
 | 2 | `ten2mat` | `tensor_utils.py::ten2mat` | `test_ten2mat_parity.py` | **0** | ✓ 完成 ⭐ column-major 主檢查點 cleared |
-| 2 | `sp_Jaco_Ax` | — | — | — | ☐ 下一步 |
-| 3 | `Multi` | — | — | — | ☐ 待開始 |
+| 2 | `sp_Jaco_Ax` | `tensor_utils.py::sp_Jaco_Ax` | `test_sp_Jaco_Ax_parity.py` | ~1e-15 | ✓ 完成 |
+| 3 | `Multi` | — | — | — | ☐ 下一步 |
 | 3 | `HONI` | — | — | — | ☐ 待開始 |
 | 4 | `main_Heig` demo | — | — | — | ☐ 待開始 |
 
 **層 1 完成後總結**：3 個純工具函式全部 parity 通過。`tenpow` 和 `sp_tendiag` 是 bit-identical（無浮點運算）；`tpv` 是 machine epsilon（矩陣-向量浮點加總）。
 
-**層 2 第一步（ten2mat）完成後總結**：column-major 主檢查點安全通過 — 對 (3,3,3)、(4,4,4)、(2,2,2,2,2) 三個 shape 全部 `max_err = 0`。`np.moveaxis + reshape(order='F')` 的策略被證明是正確對應 MATLAB `eval(express)` 動態組裝的做法。剩下 `sp_Jaco_Ax` 是 layer 2 最後一關。
+**層 2 完成後總結（ten2mat + sp_Jaco_Ax）**：
+- `ten2mat`（column-major 主檢查點）：`np.moveaxis + reshape(order='F')` 證實正確對應 MATLAB `eval(express)` 動態組裝，3 個 shape（含 5 階小維度）全部 `max_err = 0`
+- `sp_Jaco_Ax`（Jacobian 建構）：`scipy.sparse.kron` + sparse matmul 鏈路的 `max_err` 在 1e-16 ~ 1e-15 量級（符合浮點加總累積的正常誤差範圍）
+- **所有高風險 column-major 操作都完成、驗證、過關**。後續 layer 3 的 Multi / HONI 只是把工具組起來做迭代，不再有新的 layout 陷阱。
 
 ---
 
