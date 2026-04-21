@@ -1,9 +1,9 @@
 """Sanity tests for tensor_utils — 不依賴 MATLAB reference，驗證 Python
 實作本身合理（shape、邊界值、已知輸入的正確結果、輸入檢查）。"""
 import numpy as np
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_matrix, issparse
 
-from tensor_utils import tenpow, tpv
+from tensor_utils import tenpow, tpv, sp_tendiag
 
 
 def test_tenpow_basic():
@@ -134,6 +134,77 @@ def test_tpv_basic():
     print("test_tpv_basic passed")
 
 
+def test_sp_tendiag_basic():
+    # n=3, m=3: 期望 shape (3, 9)，d 在 (0,0), (1,4), (2,8)
+    d = np.array([5.0, 7.0, 11.0])
+    D = sp_tendiag(d, 3)
+    assert issparse(D)
+    assert D.shape == (3, 9)
+    assert D.nnz == 3
+    Dd = D.toarray()
+    assert Dd[0, 0] == 5.0
+    assert Dd[1, 4] == 7.0
+    assert Dd[2, 8] == 11.0
+    # 其他位置全零
+    mask = np.ones((3, 9), dtype=bool)
+    for i, j in [(0, 0), (1, 4), (2, 8)]:
+        mask[i, j] = False
+    assert np.all(Dd[mask] == 0)
+
+    # n=2, m=3: 期望 (2, 4)，d 在 (0,0), (1,3)
+    d = np.array([1.0, 2.0])
+    Dd = sp_tendiag(d, 3).toarray()
+    assert Dd.shape == (2, 4)
+    assert Dd[0, 0] == 1.0
+    assert Dd[1, 3] == 2.0
+
+    # n=5, m=4: 期望 (5, 125)，stride = (125-1)/4 = 31
+    d = np.arange(1, 6).astype(float)
+    Dd = sp_tendiag(d, 4).toarray()
+    assert Dd.shape == (5, 125)
+    for i, val in enumerate(d):
+        assert Dd[i, i * 31] == val, f"case n=5,m=4 position (i={i}, col={i*31}) wrong"
+
+    # m=1 邊界：shape (n, 1)，D 就是 d 做成 column
+    d = np.array([1.0, 2.0, 3.0])
+    Dd = sp_tendiag(d, 1).toarray()
+    assert Dd.shape == (3, 1)
+    assert np.allclose(Dd.flatten(), d)
+
+    # n=1 邊界：shape (1, 1)
+    d = np.array([42.0])
+    Dd = sp_tendiag(d, 5).toarray()
+    assert Dd.shape == (1, 1)
+    assert Dd[0, 0] == 42.0
+
+    # 輸入驗證：2-D d
+    raised = False
+    try:
+        sp_tendiag(np.array([[1.0, 2.0]]), 3)
+    except ValueError as e:
+        raised = True
+        assert "1-D" in str(e)
+    assert raised, "2-D d should raise"
+
+    # 輸入驗證：m = 0
+    raised = False
+    try:
+        sp_tendiag(np.array([1.0, 2.0]), 0)
+    except ValueError as e:
+        raised = True
+        assert ">= 1" in str(e)
+    assert raised, "m=0 should raise"
+
+    # matlab_compat no-op（輸出完全一樣）
+    d = np.array([1.0, 2.0, 3.0])
+    D1 = sp_tendiag(d, 3, matlab_compat=False).toarray()
+    D2 = sp_tendiag(d, 3, matlab_compat=True).toarray()
+    assert np.array_equal(D1, D2)
+
+    print("test_sp_tendiag_basic passed")
+
+
 if __name__ == "__main__":
     test_tenpow_basic()
     test_tpv_basic()
+    test_sp_tendiag_basic()

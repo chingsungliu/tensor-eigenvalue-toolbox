@@ -10,7 +10,7 @@
   `order='F'`，匹配 MATLAB 的欄優先儲存。
 """
 import numpy as np
-from scipy.sparse import issparse
+from scipy.sparse import csr_matrix, issparse
 
 
 def tenpow(x, p, matlab_compat=False):
@@ -133,3 +133,65 @@ def tpv(AA, x, m, matlab_compat=False):
     # sparse×1-D 的 return 型別依 scipy 版本可能為 np.matrix 或 2-D ndarray；
     # 一律 ravel 回 1-D 以維持 shape 慣例。
     return np.asarray(y).ravel()
+
+
+def sp_tendiag(d, m, matlab_compat=False):
+    """構造 m-order n-dim 對角張量的 mode-1 unfolding（scipy.sparse.csr_matrix,
+    shape `(n, n^(m-1))`）。
+
+    對應 MATLAB reference：`matlab_ref/hni/HONI.m` 第 142-149 行。
+
+    「對角張量」指對於 m-order n-dim tensor T，只有 T(i, i, ..., i) = d[i] 非零
+    （i = 0..n-1），其他位置全部為 0。本函式直接回傳它的 mode-1 unfolding。
+
+    Parameters
+    ----------
+    d : array-like, 1-D
+        對角元素向量，shape `(n,)`。
+    m : int
+        Tensor order。必須 `m >= 1`。`m = 1` 邊界時輸出 shape 為 `(n, 1)`，
+        即 d 作為 column（因為 n^0 = 1）。
+    matlab_compat : bool, default False
+        **對輸出結果無作用** — 本函式永遠使用 `reshape(..., order='F')` 匹配
+        MATLAB column-major。保留 flag 以維持 API 一致性。
+
+    Returns
+    -------
+    scipy.sparse.csr_matrix
+        Shape `(n, n^(m-1))`，有 n 個非零元素，位於 `D[i, i * stride]`，其中
+        `stride = (n^(m-1) - 1) / (n - 1)`（n=1 時 stride=0；m=1 時 stride=0）。
+
+    四大陷阱在本函式的觸發分析
+    -------------------------
+    Trap #3 Indexing：MATLAB `linspace(1, n^m, n)` 給 1-based 整數索引，Python
+        用 `np.linspace(0, n**m - 1, n).astype(int)` 對應到 0-based。
+    Trap #4 Column-major：⭐ **會觸發，但已顯式處理。** MATLAB 的
+        `reshape(D, n, n^(m-1))` 是 column-major。本函式在 scatter 之後用
+        `reshape(..., order='F')` 還原相同的 reshape。
+
+        **註**：對於「對角張量」這個特例，column-major 和 row-major 數學上
+        湊巧會把 `d[i]` 放到同一個 (row, col) 位置（因為對角元素在 1-D 中是
+        等距排列的特殊結構）。就算寫成 `order='C'` parity 也會過 — 但這是
+        巧合，不是設計規則，也不適用於別的 reshape 場景。本函式堅持寫
+        `order='F'` 以維持「reshape 一律 F」的模組公約。
+    """
+    d = np.asarray(d)
+    if d.ndim != 1:
+        raise ValueError(f"d must be 1-D, got shape {d.shape}")
+    if m < 1:
+        raise ValueError(f"m must be >= 1, got {m}")
+
+    n = len(d)
+    total = n ** m
+    num_cols = n ** (m - 1)
+
+    # Scatter d into a dense 1-D vector at the diagonal linear indices.
+    # MATLAB 1-based `linspace(1, n^m, n)` 對應 Python 0-based 如下：
+    D_vec = np.zeros(total, dtype=d.dtype)
+    positions = np.linspace(0, total - 1, n).astype(int)
+    D_vec[positions] = d
+
+    # Reshape to (n, n^(m-1)) **column-major**，匹配 MATLAB 的 reshape 語義。
+    D_dense = D_vec.reshape(n, num_cols, order="F")
+
+    return csr_matrix(D_dense)
