@@ -151,6 +151,27 @@ Port iterative algorithm **不能只比最終輸出**，因為任何中間步驟
 
 ---
 
+## Port 進度
+
+本 port 依 C5 的 4 層順序進行。每個函式 port 成功（bit-level / machine-epsilon parity）後更新下表。
+
+| 層級 | 函式 | Python 位置 | Parity test 檔 | Max error | 狀態 |
+|---|---|---|---|---|---|
+| 1 | `tenpow` | `tensor_utils.py::tenpow` | `test_tenpow_parity.py` | **0** | ✓ 完成 |
+| 1 | `tpv` | `tensor_utils.py::tpv` | `test_tpv_parity.py` | ~1e-16 | ✓ 完成 |
+| 1 | `sp_tendiag` | `tensor_utils.py::sp_tendiag` | `test_sp_tendiag_parity.py` | **0** | ✓ 完成 |
+| 2 | `ten2mat` | `tensor_utils.py::ten2mat` | `test_ten2mat_parity.py` | **0** | ✓ 完成 ⭐ column-major 主檢查點 cleared |
+| 2 | `sp_Jaco_Ax` | — | — | — | ☐ 下一步 |
+| 3 | `Multi` | — | — | — | ☐ 待開始 |
+| 3 | `HONI` | — | — | — | ☐ 待開始 |
+| 4 | `main_Heig` demo | — | — | — | ☐ 待開始 |
+
+**層 1 完成後總結**：3 個純工具函式全部 parity 通過。`tenpow` 和 `sp_tendiag` 是 bit-identical（無浮點運算）；`tpv` 是 machine epsilon（矩陣-向量浮點加總）。
+
+**層 2 第一步（ten2mat）完成後總結**：column-major 主檢查點安全通過 — 對 (3,3,3)、(4,4,4)、(2,2,2,2,2) 三個 shape 全部 `max_err = 0`。`np.moveaxis + reshape(order='F')` 的策略被證明是正確對應 MATLAB `eval(express)` 動態組裝的做法。剩下 `sp_Jaco_Ax` 是 layer 2 最後一關。
+
+---
+
 ## 為什麼 NNI 不在這個資料夾
 
 **HNI**（H-eigenvalue Newton Iteration）和 **NNI**（Nonnegative Newton Iteration）是**並列獨立的演算法**，沒有呼叫關係：

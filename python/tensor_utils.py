@@ -195,3 +195,96 @@ def sp_tendiag(d, m, matlab_compat=False):
     D_dense = D_vec.reshape(n, num_cols, order="F")
 
     return csr_matrix(D_dense)
+
+
+def ten2mat(A, k=0, matlab_compat=False):
+    """將 m-order tensor A 做 **mode-k 展開**（mode-k unfolding / matricization），
+    回傳 shape 為 `(A.shape[k], prod(其他維度))` 的 2-D 矩陣。
+
+    對應 MATLAB reference：`matlab_ref/hni/HONI.m` 第 152-177 行。MATLAB 原碼
+    用 `eval()` 動態組出 `reshape(A(:,...,i,...,:), 1, n^(m-1))` 的字串再逐 row
+    執行。**本 port 禁止使用 `eval()` 或 `exec()`**，改用 `np.moveaxis` 把
+    第 k 個 axis 搬到最前面，然後 `reshape(..., order='F')` 以匹配 MATLAB 的
+    column-major 展開。兩種做法數學上等價、結果逐位元一致，但本版是純 numpy
+    原生運算，安全且可讀。
+
+    Parameters
+    ----------
+    A : array-like
+        m-order tensor，shape `(n_0, n_1, ..., n_{m-1})`。`m` 必須 `>= 1`。
+        dense ndarray；不支援 sparse（MATLAB 原碼也不支援）。
+    k : int, default 0
+        展開的 mode index (0-based)，對應 MATLAB 原碼的 `k - 1`。必須
+        `0 <= k < A.ndim`。HNI 實際使用時 k 永遠是 0（mode-1 unfolding），
+        但本函式支援任意 mode 以維持與 MATLAB 介面的對應。
+    matlab_compat : bool, default False
+        **對輸出結果無作用** — 本函式永遠使用 `order='F'` 做 reshape，是
+        Trap #4 column-major 的主戰場。`order='F'` 是演算法正確性的必要
+        條件（見 Paper derivation 以下），不是可切換選項。保留 flag 以
+        維持 API 一致性。
+
+    Returns
+    -------
+    np.ndarray, 2-D
+        Shape `(n_k, prod(其他維度))`。對於 n-dim m-order 正方張量（所有
+        mode 大小都是 n），shape 為 `(n, n^(m-1))`。dtype 繼承自 A。
+
+    四大陷阱在本函式的觸發分析
+    -------------------------
+    Trap #3 Indexing：MATLAB 的 `k` 是 1-based，Python 的 `k` 是 0-based。
+        呼叫 MATLAB `ten2mat(A, 1)` 的對應是 Python `ten2mat(A, 0)`。
+    Trap #4 Column-major：⭐⭐ **整個 HNI port 的 column-major 主戰場**。
+        見下方 Paper derivation，數學上 row-major (`order='C'`) 和
+        column-major (`order='F'`) 對任意非對角 tensor pattern 都會產生
+        **不同的輸出陣列**，不像 `sp_tendiag` 那樣有巧合。任何未來改動
+        本函式的 `order='F'` 都會立刻被 sanity test（見
+        `test_tensor_utils.py::test_ten2mat_basic`）和 parity test 抓到。
+
+    Paper derivation (order='F' 是必要而非選擇)
+    --------------------------------------------
+    Take `T = np.arange(1, 9).reshape(2, 2, 2)`. With numpy default C-order
+    fill, entries are:
+        T[0,0,0]=1  T[0,0,1]=2  T[0,1,0]=3  T[0,1,1]=4
+        T[1,0,0]=5  T[1,0,1]=6  T[1,1,0]=7  T[1,1,1]=8
+
+    Mode-0 unfolding (k=0) defines `B[i, j] = T[i, j_1, j_2]` where `j`
+    unravels `(j_1, j_2)` in column-major over shape `(2, 2)`:
+        j=0 → (0,0)   j=1 → (1,0)   j=2 → (0,1)   j=3 → (1,1)
+
+    So the correct B is:
+        B[0, :] = [T[0,0,0], T[0,1,0], T[0,0,1], T[0,1,1]] = [1, 3, 2, 4]
+        B[1, :] = [T[1,0,0], T[1,1,0], T[1,0,1], T[1,1,1]] = [5, 7, 6, 8]
+        B_correct = [[1, 3, 2, 4], [5, 7, 6, 8]]
+
+    Implementation: `T.reshape(2, 4, order='F')` 產生正好這個結果 ✓
+
+    If `order='C'` is accidentally written instead:
+        B_wrong = [[1, 2, 3, 4], [5, 6, 7, 8]]
+    欄 1 和欄 2 在兩個結果之間被交換，max |B_F - B_C| = 1 for this input.
+    對 random 輸入來說差距是輸入動態範圍的量級（不是 machine epsilon），
+    因此 parity test 會立即以巨大誤差報告失敗。
+
+    此推導證明了 `sp_tendiag` 那種「F-order 和 C-order 巧合給出同樣 (row, col)
+    位置」的現象**不會推廣到一般 tensor**，`ten2mat` 真正需要 `order='F'`。
+
+    See also
+    --------
+    `test_tensor_utils.py::test_ten2mat_basic` 包含對比測試，直接比較
+    `ten2mat(T)` 和 `T.reshape(..., order='C')`，證明兩者不同 — 未來若有人
+    把 `order='F'` 改成 `'C'`，這個對比測試會立刻抓到。
+    """
+    A = np.asarray(A)
+    if A.ndim < 1:
+        raise ValueError(f"A must be at least 1-D, got ndim={A.ndim}")
+    if k < 0 or k >= A.ndim:
+        raise ValueError(f"k must be in [0, {A.ndim}), got {k}")
+
+    # Move the k-th axis to position 0.
+    # 對應 MATLAB `eval(express)` 裡的 `A(:,...,i,:,...,:)`（把 mode k 抽出）。
+    A_moved = np.moveaxis(A, k, 0)
+
+    n_k = A_moved.shape[0]
+    other = int(np.prod(A_moved.shape[1:])) if A_moved.ndim > 1 else 1
+
+    # Column-major (Fortran) reshape — 見 Paper derivation 為何這一步必須 'F'。
+    return A_moved.reshape(n_k, other, order="F")

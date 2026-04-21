@@ -3,7 +3,7 @@
 import numpy as np
 from scipy.sparse import csr_matrix, issparse
 
-from tensor_utils import tenpow, tpv, sp_tendiag
+from tensor_utils import tenpow, tpv, sp_tendiag, ten2mat
 
 
 def test_tenpow_basic():
@@ -204,7 +204,120 @@ def test_sp_tendiag_basic():
     print("test_sp_tendiag_basic passed")
 
 
+def test_ten2mat_basic():
+    #
+    # --- (1) Paper derivation 驗證：(2,2,2) 小例子 ---
+    #
+    T = np.arange(1, 9).reshape(2, 2, 2)  # C-order fill, entries 1..8
+    B_correct = ten2mat(T, k=0)
+    expected_correct = np.array([[1, 3, 2, 4], [5, 7, 6, 8]])
+    assert B_correct.shape == (2, 4)
+    assert np.array_equal(B_correct, expected_correct), (
+        f"Paper derivation failed: expected {expected_correct}, got {B_correct}"
+    )
+
+    #
+    # --- (2) Column-major vs row-major 對比（Trap #4 守門員）---
+    # 直接比 ten2mat(T) 和人工用 order='C' 的 reshape 結果，證明兩者不同。
+    # 若有人把 ten2mat 的 order='F' 改成 'C'，這個斷言會立刻失敗。
+    #
+    for shape in [(2, 2, 2), (3, 3, 3), (2, 3, 4)]:
+        T = np.arange(1, int(np.prod(shape)) + 1).reshape(shape)
+        B_f = ten2mat(T, k=0)  # 正確：order='F'
+        n0 = shape[0]
+        other = int(np.prod(shape[1:]))
+        B_c_wrong = T.reshape(n0, other, order="C")  # 錯誤版
+        assert not np.array_equal(B_f, B_c_wrong), (
+            f"shape {shape}: F-order and C-order MUST differ for non-diagonal "
+            f"tensor — if this assertion ever passes, someone broke the order='F'"
+        )
+
+    # (2,2,2) 特例可以 hard-code 兩邊對比值
+    T = np.arange(1, 9).reshape(2, 2, 2)
+    B_c_wrong = T.reshape(2, 4, order="C")
+    assert np.array_equal(B_c_wrong, np.array([[1, 2, 3, 4], [5, 6, 7, 8]]))
+
+    #
+    # --- (3) 公式式驗證：B[i, j] == T[i, *unravel(j, shape[1:], order='F')] ---
+    # 對三個 shape 都做完整檢查。
+    #
+    for shape in [(2, 2, 2), (3, 3, 3), (2, 3, 4)]:
+        T = np.arange(1, int(np.prod(shape)) + 1).reshape(shape)
+        B = ten2mat(T, k=0)
+        n0 = shape[0]
+        other = int(np.prod(shape[1:]))
+        assert B.shape == (n0, other), f"shape {shape}: wrong output shape {B.shape}"
+        for i in range(n0):
+            for j in range(other):
+                idx_rest = np.unravel_index(j, shape[1:], order="F")
+                # T[(i,) + idx_rest] accessed element-wise
+                expected = T[(i,) + idx_rest]
+                assert B[i, j] == expected, (
+                    f"shape {shape}, (i={i}, j={j}): B={B[i,j]} vs T[{(i,) + idx_rest}]={expected}"
+                )
+
+    #
+    # --- (4) 任意 mode k 驗證（k=1, k=2 on asymmetric shape）---
+    #
+    shape = (2, 3, 4)
+    T = np.arange(1, int(np.prod(shape)) + 1).reshape(shape)
+    for k in range(3):
+        B_k = ten2mat(T, k=k)
+        # Expected shape
+        rest = [s for idx, s in enumerate(shape) if idx != k]
+        assert B_k.shape == (shape[k], int(np.prod(rest))), (
+            f"k={k}: wrong shape {B_k.shape}, expected ({shape[k]}, {int(np.prod(rest))})"
+        )
+        # 公式式驗證
+        for i in range(shape[k]):
+            for j in range(int(np.prod(rest))):
+                idx_rest = np.unravel_index(j, tuple(rest), order="F")
+                full_idx = list(idx_rest)
+                full_idx.insert(k, i)
+                assert B_k[i, j] == T[tuple(full_idx)], (
+                    f"k={k}, (i={i}, j={j}): mismatch"
+                )
+
+    #
+    # --- (5) dtype 繼承 ---
+    #
+    for dtype in [np.float32, np.float64, np.int32]:
+        T = np.ones((2, 2, 2), dtype=dtype)
+        B = ten2mat(T, k=0)
+        assert B.dtype == dtype, f"dtype {dtype} not preserved, got {B.dtype}"
+
+    #
+    # --- (6) 輸入驗證 ---
+    #
+    # k out of range
+    raised = False
+    try:
+        ten2mat(np.ones((3, 3, 3)), k=5)
+    except ValueError as e:
+        raised = True
+        assert "[0, 3)" in str(e) or "k must" in str(e)
+    assert raised, "k out of range should raise"
+
+    raised = False
+    try:
+        ten2mat(np.ones((3, 3, 3)), k=-1)
+    except ValueError as e:
+        raised = True
+    assert raised, "negative k should raise"
+
+    #
+    # --- (7) matlab_compat no-op ---
+    #
+    T = np.arange(1, 28).reshape(3, 3, 3)
+    B1 = ten2mat(T, k=0, matlab_compat=False)
+    B2 = ten2mat(T, k=0, matlab_compat=True)
+    assert np.array_equal(B1, B2)
+
+    print("test_ten2mat_basic passed")
+
+
 if __name__ == "__main__":
     test_tenpow_basic()
     test_tpv_basic()
     test_sp_tendiag_basic()
+    test_ten2mat_basic()
