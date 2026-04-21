@@ -1,8 +1,9 @@
 """Sanity tests for tensor_utils — 不依賴 MATLAB reference，驗證 Python
 實作本身合理（shape、邊界值、已知輸入的正確結果、輸入檢查）。"""
 import numpy as np
+from scipy.sparse import csr_matrix
 
-from tensor_utils import tenpow
+from tensor_utils import tenpow, tpv
 
 
 def test_tenpow_basic():
@@ -64,5 +65,75 @@ def test_tenpow_basic():
     print("test_tenpow_basic passed")
 
 
+def test_tpv_basic():
+    # 恆等 AA (m=2): tpv(I, x, 2) = I @ x = x
+    n = 4
+    I = np.eye(n)
+    x = np.array([1.5, -0.3, 2.0, 0.7])
+    y = tpv(I, x, 2)
+    assert y.shape == (n,)
+    assert np.allclose(y, x), f"tpv(I, x, 2) should equal x, got {y}"
+
+    # 零 AA: y 全零
+    AA_zero = np.zeros((n, n ** (3 - 1)))
+    y = tpv(AA_zero, x, 3)
+    assert y.shape == (n,)
+    assert np.all(y == 0)
+
+    # 已知結果：AA 全 1、x 全 1、m=3 → y = [n^(m-1), n^(m-1), ..., n^(m-1)]
+    AA_ones = np.ones((n, n ** (3 - 1)))
+    x_ones = np.ones(n)
+    y = tpv(AA_ones, x_ones, 3)
+    assert np.allclose(y, np.full(n, n ** (3 - 1))), f"expected {n**(3-1)} everywhere, got {y}"
+
+    # m=2 退化：tenpow(x, 1) = x，所以 y = AA @ x
+    AA = np.array([[1.0, 2.0], [3.0, 4.0]])
+    x2 = np.array([1.0, 1.0])
+    y = tpv(AA, x2, 2)
+    assert np.allclose(y, AA @ x2)
+
+    # Sparse AA：應輸出 1-D dense ndarray
+    AA_sp = csr_matrix(AA)
+    y_sp = tpv(AA_sp, x2, 2)
+    assert isinstance(y_sp, np.ndarray)
+    assert y_sp.ndim == 1
+    assert np.allclose(y_sp, AA @ x2)
+
+    # 輸入驗證：2-D x 拒收
+    raised = False
+    try:
+        tpv(np.ones((3, 3)), np.array([[1.0, 2.0, 3.0]]), 2)
+    except ValueError as e:
+        raised = True
+        assert "1-D" in str(e)
+    assert raised, "2-D x should raise"
+
+    # 輸入驗證：1-D AA 拒收
+    raised = False
+    try:
+        tpv(np.ones(5), np.ones(5), 2)
+    except ValueError as e:
+        raised = True
+        assert "2-D" in str(e)
+    assert raised, "1-D AA should raise"
+
+    # 輸入驗證：m = 0 拒收
+    raised = False
+    try:
+        tpv(np.ones((3, 1)), np.ones(3), 0)
+    except ValueError as e:
+        raised = True
+        assert ">= 1" in str(e)
+    assert raised, "m=0 should raise"
+
+    # matlab_compat no-op
+    y_a = tpv(AA, x2, 2, matlab_compat=False)
+    y_b = tpv(AA, x2, 2, matlab_compat=True)
+    assert np.array_equal(y_a, y_b)
+
+    print("test_tpv_basic passed")
+
+
 if __name__ == "__main__":
     test_tenpow_basic()
+    test_tpv_basic()

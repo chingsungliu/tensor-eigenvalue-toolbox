@@ -6,10 +6,11 @@
   vector。呼叫端如有 2-D 意圖請用明確的 `reshape(-1, 1)` 或 `np.outer` 表達。
 - **Indexing**：Python 介面採 0-based（Python 自然慣例）。MATLAB 的 1-based
   語義只在 `matlab_compat=True` 路徑內部還原。
-- **Column-major 對齊**：任何 `reshape` 呼叫只要在 parity 路徑上,一律顯式
+- **Column-major 對齊**：任何 `reshape` 呼叫只要在 parity 路徑上，一律顯式
   `order='F'`，匹配 MATLAB 的欄優先儲存。
 """
 import numpy as np
+from scipy.sparse import issparse
 
 
 def tenpow(x, p, matlab_compat=False):
@@ -27,7 +28,7 @@ def tenpow(x, p, matlab_compat=False):
     p : int
         Kronecker power count — 總共要把幾個 x 做 Kronecker product。
         - `p = 0`：回傳 `np.array([1.0])`（長度 1 的 neutral element，對應
-          MATLAB 原碼的 scalar `1`；用 1-D shape 以符合本模組的 shape 慣例）
+          MATLAB 原碼的 scalar `1`；用 1-D shape 以符合本模組的 shape 慣例)
         - `p = 1`：回傳 x（copy）
         - `p >= 2`：回傳 `x ⊗ x ⊗ ... ⊗ x`（p 個 x 左結合 Kronecker product）
         必須 `>= 0`；負值會 raise ValueError。
@@ -78,3 +79,57 @@ def tenpow(x, p, matlab_compat=False):
     for _ in range(p - 1):
         result = np.kron(x, result)
     return result
+
+
+def tpv(AA, x, m, matlab_compat=False):
+    """計算 m-order tensor 的 tensor-vector product A·x^(m-1)。
+
+    對應 MATLAB reference：`matlab_ref/hni/HONI.m` 第 123-127 行（同樣的定義在
+    `Multi.m` 第 60-64 行重複一次）。
+
+    Parameters
+    ----------
+    AA : array-like or scipy.sparse matrix, 2-D
+        m-order n-dim tensor 的 mode-1 unfolding，shape `(n, n^(m-1))`。dense
+        (numpy.ndarray) 或 sparse (scipy.sparse.*_matrix) 都可以。
+    x : array-like, 1-D
+        向量，shape `(n,)`。
+    m : int
+        Tensor order；會用來算 Kronecker 次方 `x^(m-1)`。必須 `m >= 1`。
+        注意這個 `m` 是 tensor order（跟 HNI 的 m 同義），**不是** tenpow
+        的 `p`；本函式內部做 `tenpow(x, m - 1)`，把 tensor order 換成
+        Kronecker 次方傳給 tenpow。
+    matlab_compat : bool, default False
+        **對 tpv 本身是 no-op** — 矩陣-向量乘法在 MATLAB 和 numpy 產生等價
+        的浮點加總順序。底層會把 flag 一併傳進 tenpow。保留以維持 API 一致。
+
+    Returns
+    -------
+    np.ndarray, 1-D
+        Shape `(n,)`。即使 AA 是 sparse matrix，回傳的也是 1-D dense ndarray。
+
+    四大陷阱在本函式的觸發分析
+    -------------------------
+    Trap #3 Indexing：N/A — 沒有逐元素索引。
+    Trap #4 Column-major：**本函式不觸發，但 AA 參數會**。矩陣-向量乘法本身
+        是 layout-free 的（結果跟儲存順序無關），但如果呼叫端自己把 m-order
+        tensor 攤成 AA 時 reshape 順序錯，`AA @ x^(m-1)` 雖然 matmul 數值
+        上正確，但在原 tensor 語義下就是錯的。這是「trap 在 caller 不在
+        callee」的案例 — tpv 自己沒事，完全依賴上游給對的 AA。
+    """
+    if not issparse(AA):
+        AA = np.asarray(AA)
+    if AA.ndim != 2:
+        raise ValueError(f"AA must be 2-D, got shape {AA.shape}")
+
+    x = np.asarray(x)
+    if x.ndim != 1:
+        raise ValueError(f"x must be 1-D, got shape {x.shape}")
+    if m < 1:
+        raise ValueError(f"m must be >= 1, got {m}")
+
+    x_m = tenpow(x, m - 1, matlab_compat=matlab_compat)
+    y = AA @ x_m
+    # sparse×1-D 的 return 型別依 scipy 版本可能為 np.matrix 或 2-D ndarray；
+    # 一律 ravel 回 1-D 以維持 shape 慣例。
+    return np.asarray(y).ravel()
