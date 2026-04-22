@@ -19,21 +19,21 @@
 **Demo 端**：`python/streamlit_app/demo_v0.py` 是瀏覽器內互動介面，每新 port 完一個函式就加進去。目前 6 個函式（gaussian_blur + 5 個張量工具）。
 
 **Day 1 收工狀態（2026-04-21）**：HNI Layer 1+2 完成、5 個工具 parity 全過、Streamlit demo 上線、per-iteration parity POC 驗證完、14 個 commit。
-**Day 2 當前（2026-04-22）**：階段 A 寫完 `Multi.m` 的 hazard analysis（`docs/superpowers/notes/multi_hazard_analysis.md`）、**階段 B（實際 port Multi）還沒開始**，等使用者決定 5 個 open questions 再進。
+**Day 2 收工狀態（2026-04-22）**：HNI Layer 3 step 1/2（Multi port）完成、Q5 case parity 通過到 machine epsilon（max err 6.7e-16）、five history 欄位全綠（u/res/theta/hal/v）。halving path 因 Multi 在 m≥3 + random AA 沒有「健康 halving」regime，延後到 HONI integration test 自然觸發（見 `memory/feedback_multi_halving_fragility.md`）。**下一步是 HONI port（Session 3）**。
 
 長期願景：所有研究演算法都有 Python port + parity + Streamlit demo；`source_code/` 的 490MB MATLAB 遺產變成一個活的、可 reproduce 的個人工具箱。
 
 ---
 
-## 2. 新 session 必讀 — 7 條 memory
+## 2. 新 session 必讀 — 8 條 memory
 
-Claude Code 的 memory auto-load 機制在當前版本**實測沒有自動載入**（Day 2 session 開場 context 裡完全沒有 memory 內容）。為避免下次又遺漏，**新 session 一開始請主動 `view` 下列 7 條 memory 一遍**：
+Claude Code 的 memory auto-load 機制在當前版本**實測沒有自動載入**（Day 2 session 開場 context 裡完全沒有 memory 內容）。為避免下次又遺漏，**新 session 一開始請主動 `view` 下列 8 條 memory 一遍**：
 
 **路徑**：`/Users/csliu/.claude/projects/-Users-csliu-Projects-my-toolbox/memory/`
 
 | 檔案 | 類別 | 一行摘要 |
 |---|---|---|
-| `MEMORY.md` | 索引 | 其他 7 條的快速 overview |
+| `MEMORY.md` | 索引 | 其他 8 條的快速 overview |
 | `user_role.md` | user | 使用者角色、溝通語言、collaboration 風格 |
 | `project_layout.md` | project | `~/Projects/my-toolbox` 結構 + venv 位置 + 與 Google Drive mirror 的關係 |
 | `project_matlab_environment.md` | project | 本機 MATLAB **沒有** Image Processing Toolbox — reference 實作只能用 base MATLAB |
@@ -41,6 +41,7 @@ Claude Code 的 memory auto-load 機制在當前版本**實測沒有自動載入
 | `feedback_matlab_to_python_port.md` | feedback | **五大陷阱 checklist**（port 時主動對照）— 下面第 4 節有 headline 速查 |
 | `feedback_multi_version_research_code.md` | feedback | 遇到 `ver2/ver3/ver7.1/ver8.0/...` 不要亂挑、列出所有版本讓使用者決定 canonical |
 | `feedback_per_iteration_parity.md` | feedback | 迭代演算法的 parity 要**逐 iter 比對、報 first_bad_iter**、不要只比最終輸出 — 下面第 5 節有 headline 速查 |
+| `feedback_multi_halving_fragility.md` | feedback | **Day 2 新增**：Multi.m 的 halving path 在 m≥3 + random AA 沒有「健康 halving」sweet spot；halving 的 parity 延後到 HONI integration test |
 
 **開 session 建議動作**：
 ```bash

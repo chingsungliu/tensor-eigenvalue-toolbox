@@ -1,7 +1,7 @@
 # PROGRESS.md — Session checkpoint
 
-**最後更新**：2026-04-21（Day 1 收工）
-**狀態**：14 commits on `main`、working tree clean、無未 commit 變更
+**最後更新**：2026-04-22（Day 2 收工）
+**狀態**：21 commits on `main`、working tree clean、無未 commit 變更
 
 ---
 
@@ -56,7 +56,7 @@ cd ~/Projects/my-toolbox/python
 - POC 結果：`x_history` 和 `res_history` 全 11 步 bit-identical（max_err = 0）
 - POC README（繁體中文）含延伸到 Multi / HONI 的樣板說明
 
-### 五、Memory 寫入（現共 7 條）
+### 五、Memory 寫入（Day 1 結束時 7 條）
 
 | Memory 檔 | type | 說明 |
 |---|---|---|
@@ -66,13 +66,71 @@ cd ~/Projects/my-toolbox/python
 | `project_matlab_environment.md` | project | 無 Image Processing Toolbox、用 base MATLAB |
 | `project_big5_encoding.md` | project | Big5 編碼的舊 MATLAB 程式處理法 |
 | `feedback_multi_version_research_code.md` | feedback | 多版本研究程式碼要列所有版本、讓使用者決定 canonical |
-| `feedback_per_iteration_parity.md` | feedback | **今天新增**：迭代演算法的 parity 機制 |
+| `feedback_per_iteration_parity.md` | feedback | Day 1 新增：迭代演算法的 parity 機制 |
 
 ---
 
-## Git state（14 commits）
+## Day 2 (2026-04-22) 完成摘要
+
+### 一、HNI Layer 3 step 1/2（Multi port）完成
+
+Multi.m 的 Newton + 三等分 halving line search 完整 port 到 Python，Q5 case parity 通過到 machine epsilon。
+
+| 欄位 | max_err | 語意 |
+|---|---|---|
+| `hal_history` | **0.000e+00** | bit-identical |
+| `theta_history[1:]` | **0.000e+00** | bit-identical |
+| `final u` | 1.110e-16 | 0.5× machine epsilon |
+| `u_history` (2D) | 3.331e-16 | 1.5× machine epsilon |
+| `res_history` | 4.441e-16 | 2× machine epsilon |
+| `v_history[:, 1:]` (2D) | 6.661e-16 | 3× machine epsilon |
+
+Port 檔案：
+- `python/tensor_utils.py::multi` — 加 `multi(AA, b, m, tol, record_history=False)` + `sparse_norm` / `spsolve` import
+- `python/test_tensor_utils.py::test_multi_basic` — Python-only sanity（nit=5、residual 6e-12、invariant check）
+- `python/test_multi_parity.py` — 讀 .mat、5 欄逐 iter parity、final u 比對
+- `matlab_ref/hni/Multi_with_history.m` — Multi.m 逐字複本 + 5 欄 history output
+- `matlab_ref/hni/generate_multi_reference.m` — Q5 test case 驅動
+
+Port 前的 hazard analysis：`docs/superpowers/notes/multi_hazard_analysis.md`（232 行、Day 2 階段 A 產出）。五個 open questions 在 Session 2 初都由使用者決定（pre-alloc 100、0-based indexing、.tocsc()、b 不 mutate、Q5 穩定 test case）。
+
+### 二、Per-iteration parity 三件組抽成 module
+
+`poc_iteration/parity_utils.py` 新檔 — 把 `find_divergence / report / print_neighborhood` 從 POC 測試檔抽出，未來 Multi / HONI / NNI parity test 可直接 `from poc_iteration import ...`。POC 測試檔改用 parity_utils、仍 bit-identical 通過。
+
+### 三、Halving path parity 延後（技術決定、非偷懶）
+
+Q5b 試圖以 ill-conditioned AA 觸發 halving 連跑兩輪參數（scale 0.01 → 0.30 → 0.10）都 trap-and-diverge。**根因**：m=3 Multi 在 random perturbation AA 下沒有「健康 halving」sweet spot — u 一翻負、`temp = AA·u²` 出負分量、halving 拉回 u_old 但 u_old 也已負、越踩越深。
+
+這不是 port bug、是 Multi 原演算法的 fragility：halving 設計上是「near-optimal 附近微調」、不是「大幅 overshoot 修正」。HONI 會呼叫 Multi 時 u 已接近最優，halving 自然觸發、parity 在 HONI integration test 才是真實 workload。
+
+Fragility 寫進 `memory/feedback_multi_halving_fragility.md`（Day 2 新增第 8 條 memory）。
+
+### 四、Memory 寫入（Day 2 結束時 8 條）
+
+比 Day 1 多一條：
+| Memory 檔 | type | 說明 |
+|---|---|---|
+| `feedback_multi_halving_fragility.md` | feedback | **Day 2 新增**：Multi 的 halving 在 m≥3 + random AA 沒 healthy sweet spot、延後到 HONI integration test；MATLAB 原碼 `theta=3^(-hal)` 自我驗證到 8.7e-19（未來 Python 對不上的話是 Python 端 bug） |
+
+---
+
+## Git state（21 commits、Day 2 新增 4 筆）
+
+Day 2 新增（topmost）：
 
 ```
+<pending> Update PROGRESS.md and CLAUDE.md after Multi port completion   ← 本 commit
+3269ab7 Simplify multi_reference to Q5-only; document halving fragility
+21ca097 Port Multi to Python with per-iteration parity validation (Layer 3 step 1/2)
+8288758 Add CLAUDE.md as project-level context loader for new sessions
+ef38f9c Add Multi.m hazard analysis before port (階段 A)
+```
+
+Day 1 結束時 15 筆（最底下的 `d7af773` 是初始 commit）：
+
+```
+1908137 Add PROGRESS.md session checkpoint after Day 1
 9ad878f Add gaussian_blur to demo_v0 (6 functions total)
 28d8aad Add per-iteration parity POC (Newton sqrt(2)) for Layer 3 preparation
 05a04ef Implement Streamlit demo v0 per design spec
@@ -90,23 +148,26 @@ b98ea0d Port tpv to Python with parity validation
 d7af773 Initial toolbox: gaussian_blur port with parity validation
 ```
 
-（這次 commit 後會變 15 筆：最後一筆是 PROGRESS.md 本身）
-
 ---
 
-## 下一個動作：Session 2 = Port `Multi`（Layer 3 第一個迭代演算法）
+## 下一個動作：Session 3 = Port `HONI`（Layer 3 step 2/3）
 
-**為什麼先做 Multi**：
-- 它是 Layer 3 最小的一個（89 行 MATLAB，Newton 迭代 + 三等分 halving line search）
-- 是 HONI 的內層 solver，port Multi 是 port HONI 的前置
-- 會成為**per-iteration parity 框架**的第一次實戰驗證
-- POC（D3a）已經把所有機制跑過一次、框架待用
+**為什麼 HONI 緊接 Multi**：
+- Multi 是 HONI 的內層 solver、Multi port 已完成 + parity 到 machine epsilon
+- HONI 會在外層 eigenvalue iteration 中**自然呼叫 Multi**，halving path 會在 HONI 的「困難 iter」被觸發 — 這是 Multi halving 被設計要 cover 的 regime（見 `memory/feedback_multi_halving_fragility.md`）
+- HONI 完成後才有完整的 eigenvalue 解算、Streamlit demo 才能加新 tile
 
-**預計工作量**：1-2 小時（比 Layer 1/2 的單函式多、因為要設計 history 儲存 + 逐步對帳）
+**檔案**：`matlab_ref/hni/HONI.m`
 
-**執行前需確認**：
-- Layer 3 的 port 順序照 `matlab_ref/hni/README.md` 的 C5 計畫（Multi 先、然後 HONI）
-- `feedback_per_iteration_parity.md` 的 mechanism 原則要主動套用
+**預計工作量**：2-3 小時
+- HONI 外層結構預計約 150-200 行 MATLAB（比 Multi 大）
+- 主要 port 風險類型跟 Multi 類似（iteration control flow + 可能有 column-major 在 unfolding 處理）
+- Multi 已 port、Multi 的 5 個 dependency 都已 port、所以 HONI 只需 port 自身外層結構 + possibly 新 helper
+
+**執行前應做的事（建議）**：
+- 先寫 HONI hazard analysis（類似 Multi 的 A 階段），放 `docs/superpowers/notes/honi_hazard_analysis.md`
+- 逐行找 HONI.m 裡的 indexing / reshape / control-flow / sparse dispatch 陷阱
+- 先列 open questions、讓使用者決定後再動手實作
 
 ---
 
@@ -122,10 +183,10 @@ claude
 > 我回來了。用 `git log --oneline` 看進度、`cat PROGRESS.md` 看下個動作。
 
 Claude 會：
-1. 讀 PROGRESS.md 了解 Day 1 完整狀態
-2. 讀 memory（7 條、自動載入）
-3. 確認下一個動作是 Port Multi
-4. 在你同意後啟動 Session 2
+1. 讀 PROGRESS.md 了解 Day 1 + Day 2 完整狀態
+2. 讀 memory（8 條、可主動 Read）
+3. 確認下一個動作是 Port HONI（或使用者指定其他方向）
+4. 在使用者同意後啟動 Session 3
 
 ---
 
@@ -149,9 +210,10 @@ Claude 會：
 - [x] Layer 1+2 port 完、parity 全部通過
 - [x] demo v0 上線、6 函式可互動
 - [x] per-iteration parity 框架 POC 驗證
-- [x] memory 寫入（7 條）
+- [x] Layer 3 Multi port（Day 2 完成、Q5 parity 到 machine epsilon）
+- [x] halving fragility 分析 + 延後策略記錄
+- [x] memory 寫入（8 條）
 - [x] Git working tree clean
-- [ ] Layer 3 Multi port（明天 Session 2）
-- [ ] Layer 3 HONI port
-- [ ] Layer 4 整合 + demo 加 Multi/HONI
+- [ ] Layer 3 HONI port（Session 3）
+- [ ] Layer 3 整合 + demo 加 Multi/HONI
 - [ ] NNI canonical 決策 + port
