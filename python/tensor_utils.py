@@ -9,6 +9,8 @@
 - **Column-major 對齊**：任何 `reshape` 呼叫只要在 parity 路徑上，一律顯式
   `order='F'`，匹配 MATLAB 的欄優先儲存。
 """
+import warnings
+
 import numpy as np
 from scipy.sparse import (
     csr_matrix,
@@ -566,3 +568,304 @@ def multi(AA, b, m, tol, record_history=False, matlab_compat=False):
         return u, nit, hal, history
 
     return u, nit, hal
+
+
+def honi(
+    A, m, tol=1e-12, *,
+    linear_solver="exact",
+    maxit=200,
+    initial_vector=None,
+    record_history=False,
+    record_inner_history=False,
+    plot_res=False,
+    matlab_compat=False,
+):
+    """求解 m-order n-dim tensor 的最大 eigenvalue + 對應 eigenvector。
+    外層 eigenvalue iteration + 內層 Multi Newton solver（shift-invert）。
+
+    對應 MATLAB reference：`matlab_ref/hni/HONI.m`（232 行）。演算法結構與
+    陷阱分析見 `docs/superpowers/notes/honi_hazard_analysis.md`。
+
+    Parameters
+    ----------
+    A : array-like or scipy.sparse matrix
+        Polymorphic（match MATLAB 的 ndim dispatch）：
+        - 2-D `(n, n^(m-1))` — m-tensor 的 mode-1 unfolding，直接使用
+        - m-D `(n, n, ..., n)` — 方張量，內部用 `ten2mat(A, k=0)` 做 mode-1
+          unfolding（column-major reshape via `order='F'`）
+        sparse 僅支援 2-D unfolding；tensor 必須 dense。
+    m : int
+        Tensor order，`m >= 2`。必須 **int 型別**（**§四 checklist #5.4**：
+        負的 `min(temp)` 取非整數次方會產生 complex；此處強制 int 避免）。
+    tol : float, default 1e-12
+        外層 eigenvalue iteration 相對殘差停止門檻（MATLAB default 1e-12）。
+
+    Keyword-only
+    ------------
+    linear_solver : {"exact", "inexact"}, default "exact"
+        內層 Multi 的 tolerance 策略 + 外層 lambda_U / res 更新公式。
+        兩分支數學上求解同一個問題但迭代路徑完全不同、**需各自 parity**。
+        - "exact"：inner_tol = 1e-10 寫死；temp = x/y 比值；
+          lambda_U 增量更新 `-= min(temp)^(m-1)`；res 用 m-1 次方公式
+        - "inexact"：inner_tol 動態 `max(1e-10, min(res)*min(x)^(m-1)/nit_mat)`；
+          x 先 normalize、再用新 x 算 temp = tpv/x^(m-1)、lambda_U = max(temp)
+    maxit : int, default 200
+        外層最大迭代數（MATLAB default 100；本 port 放寬到 200）。
+    initial_vector : array-like 1-D, optional
+        初始 eigenvector 估計，shape `(n,)`。`None` 時用 `np.random.default_rng()`
+        隨機產生（**注意：parity test 要顯式傳入、避免 rng 不一致**）。
+    record_history : bool, default False
+        True 時回傳 history dict，含 9 個外層 history 欄位（x/lambda/res/y/
+        inner_tol/chit/hal_per_outer/innit/hal_accum），長度 `outer_nit + 1`。
+    record_inner_history : bool, default False
+        True 時額外在 history dict 加 `inner_histories` key：每外層 iter 一份
+        Multi 的 5 欄 history dict。**主要用在**外層 parity 失敗 first_bad_iter
+        指向某 outer iter k 時、重跑開啟此 flag 定位 Multi 內部狀態。預設關閉
+        因為 Multi 已單元 parity 驗證、HONI 出錯 99% 在 HONI 自身更新公式。
+    plot_res : bool, default False
+        **Q8 決定：不實作**（原 MATLAB `plot_res=1` 會 loglog 畫 residual 曲線）。
+        kwarg 保留以維持 API 可擴充；傳 True 會 `warnings.warn` 後忽略。
+    matlab_compat : bool, default False
+        **對 honi 本身是 no-op**。會傳進 `tpv / sp_tendiag / ten2mat / multi`。
+
+    Returns
+    -------
+    若 `record_history=False`：`(lambda_, x, outer_nit, total_inner_nit,
+                               outer_res_history, lambda_history)`
+        lambda_ : float
+            最大 eigenvalue 估計（λ）。
+        x : np.ndarray, 1-D `(n,)`
+            對應 unit-norm eigenvector。
+        outer_nit : int
+            外層 iter 完成次數（**Python 0-based**）。MATLAB nit = outer_nit + 1。
+        total_inner_nit : int
+            內層 Multi Newton iter 總次數，**與 MATLAB `innit` bit-identical**。
+            實作時 `total_inner_nit += chit_py + 1`（chit offset，見 §四 checklist #5.7）。
+        outer_res_history : np.ndarray, 1-D
+            每外層 iter 殘差（相對）。長度 `outer_nit + 1`，`[0]` 為初始化殘差
+            `|max(temp)-min(temp)|/lambda_U`。
+        lambda_history : np.ndarray, 1-D
+            每外層 iter 結束後的 lambda_U。長度 `outer_nit + 1`，`[0]` 為初始
+            估計 `max(tpv(AA, x_init, m) / x_init^(m-1))`。
+    若 `record_history=True`：回傳 7-tuple `(..., history)`，額外 history 是 dict，
+    9 個 key 都是長度 `outer_nit + 1` 的 array。若 `record_inner_history=True`
+    另加 `inner_histories` key（list of Multi history dict）。
+
+    §四 Hazard checklist（手眼同步點、逐條核對）
+    -------------------------------------------
+    1. **Polymorphic A**：`A.ndim == 2` 當 unfolding、`A.ndim >= m` 當 tensor、
+       tensor 必須是方張量（`A.shape` 全 n）、呼叫 `ten2mat(A, k=0, ...)`。
+    2. **`m` 強制 int**：`isinstance(m, (int, np.integer))` 開頭檢查。負
+       `min(temp)^float` 會產生 complex、int 次方保持 real（§五 5.4）。
+    3. **`inner_tol` inexact 公式**：用明變數 `nit_mat = nit + 1` 代入字面
+       MATLAB 1-based `nit`（§五 5.5）。
+    4. **`total_inner_nit` 累積**：`total_inner_nit += chit_py + 1`（Multi
+       Python nit 是 0-based、MATLAB `chit` 多一；§五 5.7）。
+    5. **`lambda_U*II - AA` sparse/dense dispatch**：sparse AA → 兩邊 sparse；
+       dense AA → 轉 `II.toarray()` 避免 scipy 型別混淆（§五 5.1）。
+    6. **exact/inexact 分支欄位拆清**：兩分支的 temp 定義、lambda_U 更新公式、
+       res 公式、x normalize 時機**全部不同**。Port 建議把兩分支的 step
+       寫在 `if/elif` 明確分離、逐字對照 MATLAB line 53-75。
+    """
+    # ---- Input validation ----
+    if not isinstance(m, (int, np.integer)):
+        raise ValueError(f"m must be int, got {type(m).__name__}")
+    m = int(m)
+    if m < 2:
+        raise ValueError(f"m must be >= 2, got {m}")
+    if tol <= 0:
+        raise ValueError(f"tol must be > 0, got {tol}")
+    if linear_solver not in ("exact", "inexact"):
+        raise ValueError(
+            f"linear_solver must be 'exact' or 'inexact', got {linear_solver!r}"
+        )
+    if maxit < 2:
+        raise ValueError(f"maxit must be >= 2, got {maxit}")
+
+    # ---- Polymorphic A dispatch ----
+    if issparse(A):
+        if A.ndim != 2:
+            raise ValueError(f"sparse A must be 2-D unfolding, got ndim={A.ndim}")
+        n = A.shape[0]
+        if A.shape[1] != n ** (m - 1):
+            raise ValueError(
+                f"sparse A shape {A.shape} incompatible with m={m}; "
+                f"expected ({n}, {n ** (m - 1)})"
+            )
+        AA = A
+    else:
+        A_arr = np.asarray(A)
+        if A_arr.ndim == 2:
+            n = A_arr.shape[0]
+            if A_arr.shape[1] != n ** (m - 1):
+                raise ValueError(
+                    f"A shape {A_arr.shape} incompatible with m={m}; "
+                    f"expected ({n}, {n ** (m - 1)})"
+                )
+            AA = A_arr
+        elif A_arr.ndim >= 3:
+            n = A_arr.shape[0]
+            if A_arr.ndim != m:
+                raise ValueError(
+                    f"tensor A.ndim={A_arr.ndim} but m={m} (need ndim == m)"
+                )
+            if not all(s == n for s in A_arr.shape):
+                raise ValueError(
+                    f"A must be square tensor (all dims == n={n}), got shape {A_arr.shape}"
+                )
+            AA = ten2mat(A_arr, k=0, matlab_compat=matlab_compat)
+        else:
+            raise ValueError(
+                f"A must be 2-D unfolding or m-D tensor, got ndim={A_arr.ndim}"
+            )
+
+    # ---- Initial vector ----
+    if initial_vector is None:
+        rng = np.random.default_rng()
+        initial_vector = rng.random(n)
+    else:
+        initial_vector = np.asarray(initial_vector, dtype=np.float64).ravel()
+        if initial_vector.shape != (n,):
+            raise ValueError(
+                f"initial_vector shape {initial_vector.shape} != ({n},)"
+            )
+
+    if plot_res:
+        warnings.warn(
+            "plot_res is not implemented in this port (HONI hazard Q8); ignoring",
+            stacklevel=2,
+        )
+
+    # ---- 初始化 (HONI.m line 35-44) ----
+    x = initial_vector / np.linalg.norm(initial_vector)                 # line 35-36
+    temp = tpv(AA, x, m, matlab_compat=matlab_compat) / (x ** (m - 1))  # line 37
+    lambda_U = float(np.max(temp))                                       # line 38
+    II = sp_tendiag(np.ones(n), m, matlab_compat=matlab_compat)          # line 39
+
+    res = np.ones(maxit, dtype=np.float64)                               # line 41
+    res[0] = abs(float(np.max(temp)) - float(np.min(temp))) / lambda_U   # line 43 (0-based)
+    nit = 0                                                               # MATLAB nit=1 → 0-based
+    innit = 0                                                             # inner Newton total (MATLAB 1-based)
+    hal = 0                                                               # halving total
+
+    # ---- history buffers ----
+    # lambda_history always tracked (part of standard 6-item return)
+    lambda_history = np.full(maxit, np.nan, dtype=np.float64)
+    lambda_history[0] = lambda_U
+
+    if record_history:
+        x_history = np.zeros((n, maxit), dtype=np.float64)
+        x_history[:, 0] = x
+        y_history = np.full((n, maxit), np.nan, dtype=np.float64)
+        inner_tol_history = np.full(maxit, np.nan, dtype=np.float64)
+        chit_history = np.zeros(maxit, dtype=np.float64)
+        hal_per_outer_history = np.zeros(maxit, dtype=np.float64)
+        innit_history = np.zeros(maxit, dtype=np.float64)
+        hal_accum_history = np.zeros(maxit, dtype=np.float64)
+        inner_histories = [None]  # slot 0 = init (no Multi call)
+
+    _MAX_NIT = maxit - 1  # Python 0-based; MATLAB `nit < maxit` ≡ Python `nit < maxit - 1`
+
+    # ---- 外層 eigenvalue iteration (HONI.m line 46-79) ----
+    while np.min(res) > tol and nit < _MAX_NIT:
+        nit += 1                                                          # line 47
+        nit_mat = nit + 1  # explicit MATLAB 1-based equivalent (Q5 checklist #3)
+
+        # Shift-invert: AA_shifted = lambda_U * II - AA (line 54/68 inside Multi call)
+        if issparse(AA):
+            AA_shifted = lambda_U * II - AA
+        else:
+            AA_shifted = lambda_U * II.toarray() - AA
+
+        # inner_tol: static (exact) or dynamic (inexact)
+        if linear_solver == "exact":
+            inner_tol = 1e-10                                             # line 53
+        else:
+            # Q5 checklist #3: nit_mat (not Python nit) matches MATLAB's literal nit
+            inner_tol = max(
+                1e-10,
+                float(np.min(res)) * float(np.min(x)) ** (m - 1) / nit_mat,
+            )                                                             # line 67
+
+        # Call Multi (inner Newton solver)
+        if record_inner_history:
+            y, chit_py, hal_inn, inner_hist = multi(
+                AA_shifted, x, m, inner_tol,
+                record_history=True, matlab_compat=matlab_compat,
+            )
+        else:
+            y, chit_py, hal_inn = multi(
+                AA_shifted, x, m, inner_tol,
+                record_history=False, matlab_compat=matlab_compat,
+            )
+            inner_hist = None
+
+        # Q6 checklist #4: chit_mat = chit_py + 1 to match MATLAB's 1-based innit
+        chit_mat = chit_py + 1
+        innit += chit_mat                                                 # line 56/70
+        hal_this_outer = int(np.sum(hal_inn))
+        hal += hal_this_outer                                             # line 55/69
+
+        # Branch-specific updates (Q1 + §四 checklist #6)
+        if linear_solver == "exact":
+            # HONI.m line 58-61: ratio → lambda update → res → normalize
+            temp = x / y
+            min_temp = float(np.min(temp))
+            max_temp = float(np.max(temp))
+            lambda_U = lambda_U - min_temp ** (m - 1)                    # line 59
+            res[nit] = abs(max_temp ** (m - 1) - min_temp ** (m - 1)) / lambda_U  # line 60
+            x = y / np.linalg.norm(y)                                    # line 61
+        else:  # "inexact"
+            # HONI.m line 72-75: normalize → tpv on new x → lambda = max
+            x = y / np.linalg.norm(y)                                    # line 72
+            temp = tpv(AA, x, m, matlab_compat=matlab_compat) / (x ** (m - 1))  # line 73
+            min_temp = float(np.min(temp))
+            max_temp = float(np.max(temp))
+            lambda_U = max_temp                                          # line 74
+            res[nit] = abs(max_temp - min_temp) / lambda_U               # line 75
+
+        lambda_history[nit] = lambda_U
+
+        if record_history:
+            x_history[:, nit] = x
+            y_history[:, nit] = y
+            inner_tol_history[nit] = inner_tol
+            chit_history[nit] = chit_mat
+            hal_per_outer_history[nit] = hal_this_outer
+            innit_history[nit] = innit
+            hal_accum_history[nit] = hal
+            if record_inner_history:
+                inner_histories.append(inner_hist)
+
+    # ---- Upper-bound sanity: pre-fill value 1.0 must bound all written res ----
+    assert np.all(res[:nit + 1] <= 1.0 + 1e-10), (
+        f"res upper-bound violation: max res[:{nit+1}] = {res[:nit+1].max():.6e}, "
+        f"pre-fill was 1.0 (should hold since res = |max-min|/lambda_U <= 1)"
+    )
+
+    outer_res_history = res[:nit + 1].copy()
+    lambda_history_out = lambda_history[:nit + 1].copy()
+
+    if record_history:
+        history = {
+            "x_history": x_history[:, :nit + 1].copy(),
+            "lambda_history": lambda_history_out.copy(),
+            "res_history": outer_res_history.copy(),
+            "y_history": y_history[:, :nit + 1].copy(),
+            "inner_tol_history": inner_tol_history[:nit + 1].copy(),
+            "chit_history": chit_history[:nit + 1].copy(),
+            "hal_per_outer_history": hal_per_outer_history[:nit + 1].copy(),
+            "innit_history": innit_history[:nit + 1].copy(),
+            "hal_accum_history": hal_accum_history[:nit + 1].copy(),
+        }
+        if record_inner_history:
+            history["inner_histories"] = inner_histories
+        return (
+            float(lambda_U), x, nit, int(innit),
+            outer_res_history, lambda_history_out, history,
+        )
+
+    return (
+        float(lambda_U), x, nit, int(innit),
+        outer_res_history, lambda_history_out,
+    )
