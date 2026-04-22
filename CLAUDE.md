@@ -22,25 +22,26 @@
 **Day 2 收工狀態（2026-04-22）**：HNI Layer 3 step 1/2（Multi port）完成、Q5 case parity 通過到 machine epsilon、five history 欄位全綠。halving path 在 m≥3 + random AA 沒有「健康 halving」regime、延後到 HONI integration test 自然觸發（見 `memory/feedback_multi_halving_fragility.md`）。
 **Day 2 末（2026-04-22 evening）**：HNI Layer 3 step 2/2（HONI port）完成、exact + inexact 兩分支都通過三 Tier parity（最終 λ/x bit-identical；中段 y_history 用 rtol、last-iter 進 Tier 2 接住 shift-invert near-singular fragility）。Day 2 末 commit 因 staging 漏掉 HONI 實作、Day 3 補完。
 **Day 3 收工狀態（2026-04-22）**：補齊 Day 2 末未及時收尾的文件 — 寫入 `memory/feedback_honi_multi_fragility_propagation.md`（第 9 條 memory）、更新 PROGRESS.md 到 Layer 3 完成、新增 `docs/hni_status.md` HNI 系統里程碑文件。**HNI 線 Layer 1/2/3 全綠**。
+**Day 4 收工狀態（2026-04-22）**：Session 4 完成 — **NNI canonical port（使用者主演算法）** 全綠。階段 A 寫 `docs/superpowers/notes/nni_hazard_analysis.md`（653 行、12 open questions 全拍板）；階段 B 實作 `nni()` 函式（`linear_solver in {'spsolve','gmres'}`、Python scope 擴展大 sparse 支援）+ parity 3-Tier 框架（overlap STRICT + final APPROX + extra-iter INFO）+ 寫入 `memory/feedback_nni_rayleigh_quotient_noise_floor.md`（第 10 條 memory、揭露 Rayleigh quotient noise floor `machine_eps/min(x_i)^(m-1)`）。**三個核心演算法（NNI + HONI + Multi）全部 port 完、parity 全綠**、milestone 文件重構為 `docs/algorithms_status.md`。
 
-**下一步（Session 4）二選一、待使用者決定**：
-- **選項 A**：Layer 4 整合 — Streamlit demo 加 Multi + HONI 兩個 renderer（1.5-2h、demo pattern 已驗證）
-- **選項 B**：NNI canonical port — HNI 並列演算法、canonical 候選已在 `matlab_ref/NNI_HNI_inventory.md` Section H 列出（4-8h、新陷阱、新階段 A）
+**下一步（Session 5）二選一、待使用者決定**：
+- **選項 A**：Layer 4 整合 — Streamlit demo 加 Multi + HONI + NNI **三個** renderer（2-3h、含 HNI vs NNI 對比 tile）
+- **選項 B**：NNI_ha port — 2020 paper 的 `Test_Heig2.m` benchmark 重現（2-4h、halving path 覆蓋）
 - 對比表見 `PROGRESS.md` 的「下一個動作」section
 
 長期願景：所有研究演算法都有 Python port + parity + Streamlit demo；`source_code/` 的 490MB MATLAB 遺產變成一個活的、可 reproduce 的個人工具箱。
 
 ---
 
-## 2. 新 session 必讀 — 9 條 memory
+## 2. 新 session 必讀 — 10 條 memory
 
-Claude Code 的 memory auto-load 機制在當前版本**實測沒有自動載入**（Day 2/3 session 開場 context 裡 MEMORY.md 索引會出現、但個別 memory 內容不會自動展開）。為避免下次又遺漏，**新 session 一開始請主動 `view` 下列 9 條 memory 一遍**：
+Claude Code 的 memory auto-load 機制在當前版本**實測沒有自動載入**（Day 2-4 session 開場 context 裡 MEMORY.md 索引會出現、但個別 memory 內容不會自動展開）。為避免下次又遺漏，**新 session 一開始請主動 `view` 下列 10 條 memory 一遍**：
 
 **路徑**：`/Users/csliu/.claude/projects/-Users-csliu-Projects-my-toolbox/memory/`
 
 | 檔案 | 類別 | 一行摘要 |
 |---|---|---|
-| `MEMORY.md` | 索引 | 其他 9 條的快速 overview |
+| `MEMORY.md` | 索引 | 其他 10 條的快速 overview |
 | `user_role.md` | user | 使用者角色、溝通語言、collaboration 風格 |
 | `project_layout.md` | project | `~/Projects/my-toolbox` 結構 + venv 位置 + 與 Google Drive mirror 的關係 |
 | `project_matlab_environment.md` | project | 本機 MATLAB **沒有** Image Processing Toolbox — reference 實作只能用 base MATLAB |
@@ -50,6 +51,7 @@ Claude Code 的 memory auto-load 機制在當前版本**實測沒有自動載入
 | `feedback_per_iteration_parity.md` | feedback | 迭代演算法的 parity 要**逐 iter 比對、報 first_bad_iter**、不要只比最終輸出 — 下面第 5 節有 headline 速查 |
 | `feedback_multi_halving_fragility.md` | feedback | **Day 2 新增**：Multi.m 的 halving path 在 m≥3 + random AA 沒有「健康 halving」sweet spot；halving 的 parity 延後到 HONI integration test |
 | `feedback_honi_multi_fragility_propagation.md` | feedback | **Day 3 新增**：HONI shift-invert 在收斂尾段 near-singular、y 量級爆增；y-like 欄位 parity 一律 rtol；inexact ~50× 比 exact 敏感；最終 λ/x 仍 bit-identical；三 Tier 框架可重用於任何 shift-invert 演算法 |
+| `feedback_nni_rayleigh_quotient_noise_floor.md` | feedback | **Day 4 新增**：NNI 的 Rayleigh quotient noise floor 公式 `machine_eps/min(x_i)^(m-1)`；tol 同量級時停止條件浮點抽籤；parity tier 設計原則（overlap STRICT + final APPROX + extra-iter INFO）；與 halving/shift-invert 並列**第三種 fragility 模式** |
 
 **開 session 建議動作**：
 ```bash
