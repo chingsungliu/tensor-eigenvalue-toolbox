@@ -16,6 +16,7 @@ from scipy.sparse import (
     issparse,
     kron as sp_kron,
 )
+from scipy.sparse.linalg import norm as sparse_norm, spsolve
 
 
 def tenpow(x, p, matlab_compat=False):
@@ -389,3 +390,179 @@ def sp_Jaco_Ax(AA, x, m, matlab_compat=False):
         J = J + term
 
     return J
+
+
+def multi(AA, b, m, tol, record_history=False, matlab_compat=False):
+    """求解多線性系統 A·u^(m-1) = b 的正解，使用外層 Newton + 內層三等分（one-third）halving line search。
+
+    對應 MATLAB reference：`matlab_ref/hni/Multi.m` 第 1-54 行。演算法結構與
+    陷阱分析見 `docs/superpowers/notes/multi_hazard_analysis.md`。
+
+    Parameters
+    ----------
+    AA : array-like or scipy.sparse matrix, 2-D
+        M-tensor 的 mode-1 unfolding，shape `(n, n^(m-1))`。可為 dense 或 sparse。
+    b : array-like, 1-D
+        多線性系統右邊，shape `(n,)`。**不會被 mutate**：MATLAB 原碼 line 15
+        做 `b = b.^(m-1)` 就地覆寫，本 port 改用 `b_raised = np.asarray(b,
+        dtype=np.float64) ** (m-1)` 隔離，保護呼叫端的輸入（Q4）。
+    m : int
+        Tensor order，`m >= 2`。
+    tol : float
+        外層 Newton 相對停止門檻：`min(res) <= tol * (na*||u|| + nb)` 則收斂。
+    record_history : bool, default False
+        `True` 時額外回傳 per-iteration history（用於 parity test）；`False` 時
+        只回傳 `(u, nit, hal)`。
+    matlab_compat : bool, default False
+        **對 multi 本身是 no-op**。會傳進 `tpv` / `sp_Jaco_Ax`，但那兩支也是
+        no-op。保留以維持模組 API 一致。
+
+    Returns
+    -------
+    若 `record_history=False`：`(u, nit, hal)`
+        u : np.ndarray, 1-D, shape `(n,)`
+            多線性系統的正解。
+        nit : int
+            外層 Newton 迭代完成次數（**Python 0-based 語意**）。`nit = 0` 表示
+            初始化即收斂、沒進外層 loop；`nit = k` 表示完成 k 次外層 iter。
+            **跟 MATLAB 的關係**：MATLAB `nit_mat = nit_py + 1`（MATLAB 把初始化
+            算作 "第 1 次"，nit_mat 最終值 = 1 + 外層 iter 次數）。
+        hal : np.ndarray, 1-D, shape `(100,)`
+            Pre-allocated 長 100 的 halving 計數 buffer（`hal[k]` = 第 k 次外層
+            iter 進入三等分 halving 的次數；`hal[0] = 0`；超過 `nit` 的位置為 0）。
+    若 `record_history=True`：`(u, nit, hal, history)`
+        history : dict，所有 array 長度 `nit + 1`，index `[0]` 存初始化狀態
+            - `u_history` : `(n, nit+1)`，每外層 iter 結束後的 u；`[:, 0]` = `b/||b||`
+            - `res_history` : `(nit+1,)`，每外層 iter 的最終殘差 `||A·u^(m-1) - b^(m-1)||`
+            - `theta_history` : `(nit+1,)`，每外層 iter 最終使用的 θ；`[0] = NaN`
+            - `hal_history` : `(nit+1,)`，每外層 iter 的 halving 次數；`[0] = 0`
+            - `v_history` : `(n, nit+1)`，每外層 iter 的 Newton 方向 `v = M \\ b`；`[:, 0] = NaN`
+
+    §四 Hazard checklist（手眼同步點、逐條手工核對）
+    ----------------------------------------------
+    1. `theta /= 3`（三等分 one-third）**不是** `/= 2`。見 Multi.m line 40。
+    2. Halving 內迴圈用 **snapshot** `u_old` / `v_old`（line 33），不是當前 `u` / `v`。
+       每次 halving 都從同一個 snapshot 重新插值、不鏈式累加。見 Multi.m line 41。
+    3. `b_raised = np.asarray(b, dtype=np.float64) ** (m-1)`：保證 float64、且
+       不 mutate 呼叫端的 `b`（MATLAB 原碼 line 15 是 in-place、本 port 隔離）。
+    4. `M = (sp_Jaco_Ax(...) / (m-1)).tocsc()`：spsolve 前顯式轉 CSC、避免
+       scipy.sparse.linalg 對 CSR 輸入的 SparseEfficiencyWarning（Q3）。
+    5. Pre-allocate buffers：`res = np.full(100, na+nb)`、`hal = np.zeros(100)`。
+       外層 while 條件用 `np.min(res)`（整條 buffer），靠 pre-fill 值 `na+nb`
+       大於實際殘差才能避免 min 被未寫區干擾（Q1、見 hazard analysis §二）。
+    6. 內層 while 條件 **不交換順序**：`res[nit] - res[nit-1] > 0 or np.min(temp) < 0`。
+       MATLAB line 39 `||` 是 short-circuit OR，逐字保留可讀 + debug 時易對照。
+
+    Indexing convention (Q2)
+    ------------------------
+    完全 Python 0-based、不保留 MATLAB 1-based。對應關係：
+    - MATLAB `res(1)` ≡ Python `res[0]`（初始化後的殘差）
+    - MATLAB `res(nit_mat)` ≡ Python `res[nit_py]` where `nit_py = nit_mat - 1`
+    - 寫 parity test 時對 `nit` scalar 做 `assert nit_mat == nit_py + 1`
+
+    Raises
+    ------
+    ValueError
+        若 `b` 不是 1-D、`m < 2`、`tol <= 0`。
+    AssertionError
+        函式尾端 sanity：`res[:nit+1] <= na + nb + 1e-10`。若失敗表示
+        pre-fill 策略的 upper bound 被突破，需要回頭檢查數學假設。
+    """
+    b_vec = np.asarray(b, dtype=np.float64)
+    if b_vec.ndim != 1:
+        raise ValueError(f"b must be 1-D, got shape {b_vec.shape}")
+    if not isinstance(m, (int, np.integer)) or m < 2:
+        raise ValueError(f"m must be integer >= 2, got {m}")
+    if tol <= 0:
+        raise ValueError(f"tol must be > 0, got {tol}")
+
+    # --- 初始化 (Multi.m line 14-21) ---
+    u = b_vec / np.linalg.norm(b_vec)                           # line 14
+    b_raised = b_vec ** (m - 1)                                 # line 15 (no mutation of caller's b)
+
+    if issparse(AA):
+        na = float(np.sqrt(sparse_norm(AA, np.inf) * sparse_norm(AA, 1)))  # line 16
+    else:
+        AA_arr = np.asarray(AA)
+        if AA_arr.ndim != 2:
+            raise ValueError(f"AA must be 2-D, got shape {AA_arr.shape}")
+        na = float(np.sqrt(
+            np.linalg.norm(AA_arr, np.inf) * np.linalg.norm(AA_arr, 1)
+        ))
+
+    nb = float(np.linalg.norm(b_raised))                        # line 17
+    temp = tpv(AA, u, m, matlab_compat=matlab_compat)           # line 18
+
+    _BUF = 100
+    res = np.full(_BUF, na + nb, dtype=np.float64)              # line 19
+    res[0] = np.linalg.norm(temp - b_raised)                    # line 20 (MATLAB res(1))
+    hal = np.zeros(_BUF, dtype=np.float64)                      # line 21
+    nit = 0                                                      # line 21: MATLAB `nit=1` → Python 0-based
+
+    if record_history:
+        n = len(u)
+        u_history = np.zeros((n, _BUF), dtype=np.float64)
+        u_history[:, 0] = u
+        v_history = np.full((n, _BUF), np.nan, dtype=np.float64)
+        theta_history = np.full(_BUF, np.nan, dtype=np.float64)
+
+    tol_theta = 1e-14                                            # line 32
+    _MAX_NIT = _BUF - 1  # Python 0-based: MATLAB `nit < 100` 相當於 Python `nit < 99`
+
+    # --- 外層 Newton 迴圈 (line 22-52) ---
+    while np.min(res) > tol * (na * np.linalg.norm(u) + nb) and nit < _MAX_NIT:
+        nit += 1                                                 # line 24
+
+        # 1. Jacobian + 線性求解 (line 27-28)
+        M = (sp_Jaco_Ax(AA, u, m, matlab_compat=matlab_compat) / (m - 1)).tocsc()
+        v = spsolve(M, b_raised)
+
+        # 2. Newton step θ = 1 試算 (line 31-37)
+        theta = 1.0
+        u_old = u.copy()                                         # line 33 snapshot
+        v_old = v.copy()
+        u = (1 - theta / (m - 1)) * u_old + theta * v_old / (m - 1)    # line 34
+        temp = tpv(AA, u, m, matlab_compat=matlab_compat)        # line 35
+        res[nit] = np.linalg.norm(temp - b_raised)               # line 36
+        hit = 0                                                   # line 37
+
+        # 3. 三等分 halving line search (line 39-50)
+        #    OR 順序保持 MATLAB 寫法：先 res 比較、再 min(temp) < 0
+        while res[nit] - res[nit - 1] > 0 or np.min(temp) < 0:
+            theta /= 3                                           # line 40 (/3 NOT /2)
+            u = (1 - theta / (m - 1)) * u_old + theta * v_old / (m - 1)  # line 41 snapshot-based
+            temp = tpv(AA, u, m, matlab_compat=matlab_compat)    # line 42
+            res[nit] = np.linalg.norm(temp - b_raised)           # line 43-44
+            hit += 1                                              # line 45
+            if theta < tol_theta:                                 # line 46
+                print(
+                    "Can't find a suitible step length such that inner residual decrease!"
+                )
+                break
+
+        hal[nit] = hit                                           # line 51
+
+        if record_history:
+            u_history[:, nit] = u
+            v_history[:, nit] = v
+            theta_history[nit] = theta
+
+    # Upper-bound sanity: pre-fill 值 (na+nb) 必須大於任何實際算出的殘差，否則
+    # `min(res)` 的邏輯會被 pre-fill 值誤觸發收斂。失敗表示 hazard analysis §二
+    # 選項 (A) 的 upper-bound 假設在此輸入下不成立，需檢查數學假設。
+    assert np.all(res[:nit + 1] <= na + nb + 1e-10), (
+        f"res upper-bound violation: max res[:{nit+1}] = {res[:nit+1].max():.6e}, "
+        f"na+nb = {na + nb:.6e}"
+    )
+
+    if record_history:
+        history = {
+            "u_history": u_history[:, :nit + 1].copy(),
+            "res_history": res[:nit + 1].copy(),
+            "theta_history": theta_history[:nit + 1].copy(),
+            "hal_history": hal[:nit + 1].copy(),
+            "v_history": v_history[:, :nit + 1].copy(),
+        }
+        return u, nit, hal, history
+
+    return u, nit, hal

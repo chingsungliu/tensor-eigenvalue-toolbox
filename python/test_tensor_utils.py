@@ -1,9 +1,9 @@
 """Sanity tests for tensor_utils — 不依賴 MATLAB reference，驗證 Python
 實作本身合理（shape、邊界值、已知輸入的正確結果、輸入檢查）。"""
 import numpy as np
-from scipy.sparse import csr_matrix, issparse
+from scipy.sparse import csr_matrix, issparse, random as sp_random
 
-from tensor_utils import tenpow, tpv, sp_tendiag, ten2mat, sp_Jaco_Ax
+from tensor_utils import tenpow, tpv, sp_tendiag, ten2mat, sp_Jaco_Ax, multi
 
 
 def test_tenpow_basic():
@@ -418,9 +418,131 @@ def test_sp_Jaco_Ax_basic():
     print("test_sp_Jaco_Ax_basic passed")
 
 
+def test_multi_basic():
+    """Q5 test case sanity — Python-only，不做 parity。
+
+    構造一個 diagonally dominant 的 M-tensor 樣測試：
+      - n = 20, m = 3
+      - d ∈ [1, 11]（對角絕對正）
+      - 小 sparse perturbation（0.01 scale、不破壞 diagonally dominant）
+      - b > 0（保證有正解）
+    目標：
+      - 外層 Newton 在 <= 10 iter 收斂
+      - 最終 ||A·u^(m-1) - b^(m-1)|| < 1e-8
+      - u 全正（positive solution invariant）
+      - history 欄位形狀、語意一致（theta 和 hal 的關係 theta = 3^(-hal)）
+    """
+    rng = np.random.default_rng(42)
+    n = 20
+    m = 3
+
+    # (a) 對角 d ∈ [1, 11]，保證對角絕對正且 >> 0
+    d = rng.random(n) * 10.0 + 1.0
+
+    # (b) 小 sparse perturbation：2% density、entries uniform in [0, 0.01]
+    pert = sp_random(
+        n, n ** (m - 1),
+        density=0.02,
+        random_state=rng,
+        format="csr",
+    ) * 0.01
+
+    AA = sp_tendiag(d, m) + pert
+    b = np.abs(rng.random(n)) + 0.1
+    tol = 1e-10
+
+    # --- (1) default path: record_history=False ---
+    u, nit, hal = multi(AA, b, m, tol)
+    assert u.shape == (n,), f"u shape {u.shape}"
+    assert np.all(u > 0), (
+        f"all u entries must be > 0 (positive solution invariant), got min = {u.min()}"
+    )
+    assert nit <= 10, f"should converge within 10 outer iters on Q5 case, got nit={nit}"
+    assert isinstance(hal, np.ndarray) and hal.shape == (100,), (
+        f"hal should be pre-allocated (100,) buffer, got {hal.shape}"
+    )
+
+    b_raised = b ** (m - 1)
+    residual_vec = tpv(AA, u, m) - b_raised
+    res_norm = float(np.linalg.norm(residual_vec))
+    assert res_norm < 1e-8, f"final residual too large: {res_norm:.3e}"
+
+    # --- (2) record_history=True 產物一致性 ---
+    u2, nit2, hal2, history = multi(AA, b, m, tol, record_history=True)
+    assert np.allclose(u, u2), "record_history=True should not change solution"
+    assert nit == nit2, "record_history=True should not change nit"
+
+    for key in ("u_history", "res_history", "theta_history", "hal_history", "v_history"):
+        assert key in history, f"history dict missing key '{key}'"
+
+    assert history["u_history"].shape == (n, nit + 1)
+    assert history["res_history"].shape == (nit + 1,)
+    assert history["theta_history"].shape == (nit + 1,)
+    assert history["hal_history"].shape == (nit + 1,)
+    assert history["v_history"].shape == (n, nit + 1)
+
+    # 初始化 slot [0] 語意
+    assert np.allclose(history["u_history"][:, 0], b / np.linalg.norm(b)), (
+        "u_history[:, 0] should be the init u = b / ||b||"
+    )
+    assert np.isnan(history["theta_history"][0]), "theta_history[0] should be NaN (no Newton step at init)"
+    assert history["hal_history"][0] == 0
+    assert np.all(np.isnan(history["v_history"][:, 0])), "v_history[:, 0] should be NaN vector"
+
+    # 最後一個 slot = 返回的 u
+    assert np.allclose(history["u_history"][:, -1], u)
+
+    # theta ∈ (0, 1] 且與 hal 關係 theta = 3^(-hal) 成立
+    for k in range(1, nit + 1):
+        t = history["theta_history"][k]
+        h = history["hal_history"][k]
+        assert not np.isnan(t) and 0 < t <= 1, f"theta_history[{k}] = {t} out of (0, 1]"
+        expected = 3.0 ** (-h)
+        assert np.isclose(t, expected), (
+            f"theta/hal invariant broken at iter {k}: theta={t}, hal={h}, expected={expected}"
+        )
+
+    # --- (3) Input validation ---
+    raised = False
+    try:
+        multi(AA, b.reshape(-1, 1), m, tol)  # 2-D b
+    except ValueError as e:
+        raised = True
+        assert "1-D" in str(e)
+    assert raised, "2-D b should raise"
+
+    raised = False
+    try:
+        multi(AA, b, 1, tol)  # m < 2
+    except ValueError:
+        raised = True
+    assert raised, "m=1 should raise"
+
+    raised = False
+    try:
+        multi(AA, b, m, 0.0)  # tol <= 0
+    except ValueError:
+        raised = True
+    assert raised, "tol=0 should raise"
+
+    # --- (4) matlab_compat no-op ---
+    u_a, nit_a, _ = multi(AA, b, m, tol, matlab_compat=False)
+    u_b, nit_b, _ = multi(AA, b, m, tol, matlab_compat=True)
+    assert np.allclose(u_a, u_b)
+    assert nit_a == nit_b
+
+    # --- (5) b 不被 mutate ---
+    b_before = b.copy()
+    _ = multi(AA, b, m, tol)
+    assert np.array_equal(b, b_before), "multi() must not mutate caller's b"
+
+    print(f"test_multi_basic passed  (nit={nit}, final residual={res_norm:.3e})")
+
+
 if __name__ == "__main__":
     test_tenpow_basic()
     test_tpv_basic()
     test_sp_tendiag_basic()
     test_ten2mat_basic()
     test_sp_Jaco_Ax_basic()
+    test_multi_basic()
