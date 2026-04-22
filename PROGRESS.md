@@ -1,7 +1,7 @@
 # PROGRESS.md — Session checkpoint
 
-**最後更新**：2026-04-22（Day 3 收工）
-**狀態**：Layer 3（Multi + HONI）完整完成、HNI 系統 port 全綠、待決定 Layer 4 整合 vs NNI canonical port
+**最後更新**：2026-04-22（Day 4 收工）
+**狀態**：Layer 3+（Multi + HONI + **NNI**）完整完成、**三個核心演算法全綠**、下一步 Layer 4 demo 整合
 
 ---
 
@@ -210,46 +210,122 @@ d7af773 Initial toolbox: gaussian_blur port with parity validation
 
 ---
 
-## 下一個動作：Session 4 — 二選一（待使用者決定）
 
-### 選項 A：Layer 4 整合（Streamlit demo 加 Multi + HONI 兩個 renderer）
+## Day 4 (2026-04-22) 完成摘要 — NNI port（Session 4 階段 A + B）
 
-**為什麼**：
-- HNI 系統 Layer 1/2/3 全部 port 完、parity 全綠 → 把使用者面向的 demo 補齊、HNI 的「可瀏覽器互動」價值才實現
-- 新增 2 個 renderer（Multi 一個、HONI 一個），照 demo_v0 已驗證的 §9 擴充 contract（4 處改動：import / helper / renderer / dict 行）
-- Multi renderer：左欄輸入 m / n / tol、右欄印 nit、residual decay、最終 u（plot u_history 收斂軌跡）
-- HONI renderer：左欄輸入 m / n / tol / linear_solver、右欄印 lambda、x、收斂曲線；可選擇 exact / inexact 對比
+### 一、Layer 3+ step 3/3（NNI canonical port）完成
 
-**預計工作量**：1.5-2 小時（demo 已成熟、純擴充）
+NNI.m（`source_code/Tensor Eigenvalue Problem/2020_HNI_Revised/NNI.m`、271 行、canonical 無 halving 版）port 到 Python。**NNI 是使用者主演算法**（HNI 是另一個角度、Multi 是共用基礎）。
 
-**產出**：`python/streamlit_app/demo_v0.py` 從 6 函式擴到 8 函式；HNI 線端到端可 demo
+**Scope 擴展**：`linear_solver in {'spsolve', 'gmres'}`
+- `spsolve`：對應 MATLAB backslash、parity target
+- `gmres`：Python-only 大 sparse 支援、sanity test 驗兩 solver λ 差 < 1e-6
 
----
+**Parity 結果**（Q7 test case = Multi Q5 / HONI Q4 同款 rng(42) 參數）：
 
-### 選項 B：NNI canonical port（HNI 並列演算法）
-
-**為什麼**：
-- NNI（Non-negative tensor Iteration）是 HNI 的兄弟線、同樣解非負張量最大特徵值、但 algorithm 完全不同
-- canonical 候選 + 版本 inventory 已在 `matlab_ref/NNI_HNI_inventory.md` Section H 列出、待使用者拍板
-- 一旦 NNI 也 port 完、可在 demo 對比 HNI vs NNI 的收斂行為（同一 AA 兩個演算法）
-
-**預計工作量**：unknown — 取決於 canonical 版本的複雜度
-- 階段 A：確認 NNI canonical 版本（使用者決定）+ hazard analysis
-- 階段 B：port + parity（依 Multi/HONI 經驗、預計 4-8 小時）
-
-**產出**：`python/tensor_utils.py::nni`（或拆檔）+ parity test + hazard analysis 文件
-
----
-
-### 對比（給使用者決策參考）
-
-| 維度 | A：Layer 4 整合 | B：NNI port |
+| Tier | 度量 | 結果 |
 |---|---|---|
-| 工作量 | 短（1.5-2h） | 中-長（4-8h） |
-| 風險 | 低（demo pattern 已驗證） | 中（新演算法、新陷阱） |
-| 立即價值 | HNI 線可瀏覽器 demo | 工具箱演算法庫 +1 |
-| 適合時機 | 想看 HNI 階段成果 | 想推進 port 廣度 |
-| 後續解鎖 | NNI 完成後可加進同一 demo | 完成 + 整合後可 HNI vs NNI 對比 demo |
+| **Tier 1 STRICT**（overlap [0:22]）| x/w/y abs + y rel | max_err ≤ 1e-11；x/w/y machine eps |
+| **Tier 2 APPROX**（final outputs）| λ_U abs, x rel | 3.5e-13, 4.9e-17 |
+| **Tier 3 INFO**（no-assert）| MATLAB 多 5 iter | iter 22-26 於 noise floor 震盪 |
+
+**Pattern (C) 根因 — Rayleigh quotient noise floor**（**非** sparse vs dense LU pivot 差異）：
+- `temp = tpv(AA, x, m) / (x^(m-1))` 的 element-wise 除法在 `min(x_i) = 4.8e-6` 時把 tpv 的 1e-16 誤差放大到 ~1e-12
+- 跟 tol=1e-12 同量級、res 停止條件浮點抽籤
+- 公式：`eigenvalue_noise_floor ≈ machine_eps / min(x_i)^(m-1)`
+- 詳見 `memory/feedback_nni_rayleigh_quotient_noise_floor.md`（Day 4 新增、第 10 條 memory）
+
+**Port 檔案**：
+- `python/tensor_utils.py::nni` — spsolve + gmres 雙分支、polymorphic A、8 欄 history + gmres_info_history、§五 NNI 專屬 hazard checklist 4 條
+- `python/test_tensor_utils.py::test_nni_basic` — 10 sub-check Python-only sanity（含 gmres 分支覆蓋 3 處）
+- `python/test_nni_parity.py` — 3-Tier parity 框架（overlap STRICT + final APPROX + extra-iter INFO）
+- `matlab_ref/nni/NNI_with_history.m` — canonical NNI.m GE 路徑 + step_length no-halving + 7 欄 history
+- `matlab_ref/nni/generate_nni_reference.m` — Q7 driver，rng(42) 完全複製 Multi Q5 參數
+
+Port 前的 hazard analysis：`docs/superpowers/notes/nni_hazard_analysis.md`（Session 4 階段 A、653 行、12 open questions 全部由使用者決定、commit `ab454ea`）。
+
+### 二、Memory 寫入（Day 4 結束時 10 條）
+
+比 Day 3 多一條：
+| Memory 檔 | type | 說明 |
+|---|---|---|
+| `feedback_nni_rayleigh_quotient_noise_floor.md` | feedback | **Day 4 新增**：NNI 的 Rayleigh quotient noise floor 公式 `machine_eps/min(x_i)^(m-1)`；parity tier 設計原則；與 halving（Multi）/ shift-invert（HONI）並列**第三種 fragility 模式** |
+
+### 三、三種 fragility 模式收斂
+
+三條 memory 涵蓋 port 的三種 fragility 源頭：
+
+| Fragility | 觸發者 | 位置 | 參考 memory |
+|---|---|---|---|
+| halving sweet spot | Multi | line search 設計邊界（m≥3 random AA） | Day 2 |
+| shift-invert global | HONI | lambda_U → eigenvalue 整個 M 近奇異 | Day 3 |
+| Rayleigh quotient local | NNI | min(x_i) → 0 的 element-wise 除法放大 | Day 4 |
+
+---
+
+## Git state（Day 4 收工）
+
+Day 4 新增（topmost、4 筆預計）：
+
+```
+<pending4> Rename hni_status.md → algorithms_status.md with NNI as primary algorithm
+<pending3> Update CLAUDE.md context loader for NNI completion
+<pending2> Update PROGRESS.md after NNI port (Layer 3+ complete, all algorithms ported)
+55921bc   Port NNI (canonical, 2020_HNI_Revised) to Python with linear solver menu (Session 4 階段 B)
+ab454ea   Add NNI.m hazard analysis before port (Session 4 階段 A)
+```
+
+Day 3 結束時：
+
+```
+5974879 Add HONI implementation files missed from ccbe5c4 (Layer 3 step 2/2 cleanup)
+583e908 Add HNI system-level status document after Layer 3 complete
+f3ff657 Update CLAUDE.md context loader for Day 3
+466da26 Update PROGRESS.md after Day 2 session (Layer 3 complete)
+ccbe5c4 Port HONI (exact + inexact) to Python with tiered parity validation (Layer 3 step 2/2)
+```
+
+---
+
+## 下一個動作：Session 5 — 二選一（待使用者決定）
+
+### 選項 A：Layer 4 整合（Streamlit demo 加 Multi + HONI + NNI 三個 renderer）
+
+**為什麼**：
+- 三個核心演算法都 port 完、parity 全綠 → demo 補齊、整個工具箱的瀏覽器互動完整
+- 特別吸引點：**同一 AA 跑 HNI vs NNI 對比 tile**（使用者研究主軸的視覺化）、展示兩個演算法的收斂行為差異
+- demo pattern 已驗證（gaussian_blur + 5 個 Layer 1/2 工具）、§9 擴充 contract 有 Day 1 的實測
+
+**預計工作量**：2-3 小時（3 個 renderer、較 HNI-only 版本多 1 個）
+
+**產出**：`python/streamlit_app/demo_v0.py` 擴到 9 函式；HNI+NNI 端到端可 demo + 對比
+
+---
+
+### 選項 B：NNI_ha port（benchmark 重現）
+
+**為什麼**：
+- `Test_Heig2.m` 的 benchmark 實際呼叫的是 `NNI_ha`（halving 啟用版）、不是 canonical `NNI.m`
+- 若要重現 2020 paper 的 HNI vs NNI benchmark 實驗、需要 port NNI_ha
+- 實作差異：加 halving `while` 迴圈（`θ /= 2`、`tol_theta=1e-12`）
+
+**預計工作量**：2-4 小時
+- `nni(halving=True)` 分支、或獨立 `nni_ha()` 函式（使用者決定）
+- 對 `NNI_ha.m` 的 parity test（halving path 覆蓋）
+- hazard analysis 已涵蓋、不用再寫
+
+**產出**：`nni()` 加 halving 分支 + `test_nni_ha_parity.py` + `matlab_ref/nni/NNI_ha_with_history.m`
+
+---
+
+### 對比
+
+| 維度 | A：Layer 4 demo 整合 | B：NNI_ha port |
+|---|---|---|
+| 工作量 | 2-3h | 2-4h |
+| 風險 | 低（pattern 已驗證） | 低（hazard analysis 已覆蓋） |
+| 立即價值 | 所有演算法可互動 demo、對比 HNI/NNI | paper benchmark 可重現 |
+| 適合時機 | 想看端到端產品化成果 | 想重現研究實驗 |
 
 ---
 
@@ -265,11 +341,11 @@ claude
 > 我回來了。用 `git log --oneline` 看進度、`cat PROGRESS.md` 看下個動作。
 
 Claude 會：
-1. 讀 PROGRESS.md 了解 Day 1 + Day 2 + Day 3 完整狀態
-2. 讀 memory（9 條、可主動 Read）
-3. 看 `docs/hni_status.md` 了解 HNI 系統現況（1 分鐘）
-4. 確認下一個動作是 A 或 B（或使用者指定其他方向）
-5. 在使用者同意後啟動 Session 4
+1. 讀 PROGRESS.md 了解 Day 1-4 完整狀態
+2. 讀 memory（10 條、可主動 Read）
+3. 看 `docs/algorithms_status.md` 了解三個演算法系統現況（1 分鐘）
+4. 確認下一個動作是 Session 5 的 A 或 B（或其他方向）
+5. 在使用者同意後啟動 Session 5
 
 ---
 
@@ -278,13 +354,15 @@ Claude 會：
 | 檔案 | 用途 |
 |---|---|
 | `PROGRESS.md`（本檔） | Session checkpoint、下一步指南 |
-| `matlab_ref/hni/README.md` | HNI port 進度表（每個 layer 的狀態） |
+| `docs/algorithms_status.md` | 三個演算法系統（NNI/HNI/Multi）整體狀態 |
+| `matlab_ref/hni/README.md` | HNI port 進度表 |
 | `matlab_ref/GLOBAL_INVENTORY.md` | 1304 個 `.m` 檔全局地圖 |
 | `matlab_ref/NNI_HNI_inventory.md` | HNI/NNI 線的詳細盤點（含 Section H：NNI canonical 決策） |
 | `matlab_ref/poc_iteration/README.md` | Per-iteration parity 框架的設計文件 |
 | `docs/superpowers/specs/2026-04-21-streamlit-demo-v0-design.md` | Demo v0 正式 spec |
-| `python/tensor_utils.py` | 5 個已 port 的 tensor 工具 |
-| `python/streamlit_app/demo_v0.py` | 6 個函式的 Streamlit UI |
+| `docs/superpowers/notes/nni_hazard_analysis.md` | NNI port 階段 A 的 hazard analysis（653 行） |
+| `python/tensor_utils.py` | Layer 1/2/3 共 8 個函式（5 工具 + Multi + HONI + NNI） |
+| `python/streamlit_app/demo_v0.py` | 6 個函式的 Streamlit UI（待擴到 9） |
 | `.gitignore` | 已排除 `.venv/`、`*.mat`、`.DS_Store`、`__pycache__/`、`source_code/` |
 
 ---
@@ -297,7 +375,9 @@ Claude 會：
 - [x] halving fragility 分析 + 延後策略記錄
 - [x] Layer 3 HONI port（Day 2 末完成、exact + inexact 通過 tier parity）
 - [x] shift-invert fragility 分析 + 三 Tier 框架記錄
-- [x] memory 寫入（9 條）
-- [x] HNI 系統 milestone 文件（`docs/hni_status.md`）
-- [ ] Layer 4：demo 加 Multi + HONI（選項 A）
-- [ ] NNI canonical 決策 + port（選項 B）
+- [x] **Layer 3+ NNI port**（**Day 4 完成、spsolve + gmres、3-Tier parity 全綠**）
+- [x] **Rayleigh quotient noise floor 分析 + 跨三演算法 fragility 模式整合**
+- [x] memory 寫入（10 條）
+- [x] 演算法系統 milestone 文件（`docs/algorithms_status.md`、重構自 `hni_status.md`）
+- [ ] Layer 4：demo 加 Multi + HONI + NNI（Session 5 選項 A）
+- [ ] NNI_ha port（Session 5 選項 B）
