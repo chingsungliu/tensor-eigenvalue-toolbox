@@ -3,7 +3,7 @@
 import numpy as np
 from scipy.sparse import csr_matrix, issparse, random as sp_random
 
-from tensor_utils import tenpow, tpv, sp_tendiag, ten2mat, sp_Jaco_Ax, multi, honi
+from tensor_utils import tenpow, tpv, sp_tendiag, ten2mat, sp_Jaco_Ax, multi, honi, nni
 
 
 def test_tenpow_basic():
@@ -748,6 +748,271 @@ def test_honi_basic():
     )
 
 
+def test_nni_basic():
+    """NNI Python-only sanity (parity 見 test_nni_parity.py)。
+
+    Q7 決定：test case 完全複製 Multi Q5 參數（rng=42, n=20, m=3, d ∈ [1,11],
+    pert scale 0.01）— clean M-tensor、healthy 收斂、演算法不該踩 §五 專屬
+    fragility。
+
+    **注意**：gmres 在收斂尾段（iter ~ nit-1）`M_shifted` near-singular 時可能
+    發 UserWarning（§五.2 row-wise ill-conditioning）；測試用 `catch_warnings`
+    壓掉。這是預期行為、不影響最終 λ/x。
+    """
+    import warnings as _w
+
+    rng = np.random.default_rng(42)
+    n = 20
+    m = 3
+
+    # Q7 = Multi Q5 參數完全複製
+    d = rng.random(n) * 10.0 + 1.0
+    pert = sp_random(
+        n, n ** (m - 1),
+        density=0.02,
+        random_state=rng,
+        format="csr",
+    ) * 0.01
+    AA = sp_tendiag(d, m) + pert
+    initial_vector = np.abs(rng.random(n)) + 0.1
+    tol = 1e-10
+
+    # --- (1) spsolve 分支基本 invariants ---
+    lambda_s, x_s, nit_s, lambda_L_s, res_s, lamU_hist_s = nni(
+        AA, m, tol,
+        linear_solver="spsolve",
+        initial_vector=initial_vector,
+        maxit=200,
+    )
+    assert isinstance(lambda_s, float)
+    assert isinstance(lambda_L_s, float)
+    assert x_s.shape == (n,)
+    assert np.isclose(np.linalg.norm(x_s), 1.0), "x should be unit-norm"
+    assert lambda_s > 0, f"λ_U should be positive, got {lambda_s}"
+    assert lambda_s >= lambda_L_s, (
+        f"NNI invariant λ_U >= λ_L broken: λ_U={lambda_s}, λ_L={lambda_L_s}"
+    )
+    assert 0 < nit_s < 200, f"nit out of sane range, got {nit_s}"
+    assert res_s.shape == (nit_s + 1,)
+    assert lamU_hist_s.shape == (nit_s + 1,)
+    assert res_s[-1] < 1e-6, f"final res {res_s[-1]:.3e} not small enough"
+    # Perron-Frobenius: x 保持正（§五.1 — 不主動投影但理論保證）
+    assert np.all(x_s > 0), f"x must remain positive, got min = {x_s.min()}"
+
+    # --- (2) gmres 分支（Q2: eigenvalue match spsolve 在 1e-6 以內）---
+    with _w.catch_warnings():
+        _w.simplefilter("ignore")  # 預期收斂尾段有 near-singular warn
+        lambda_g, x_g, nit_g, lambda_L_g, res_g, lamU_hist_g = nni(
+            AA, m, tol,
+            linear_solver="gmres",
+            initial_vector=initial_vector,
+            maxit=200,
+        )
+    assert np.all(x_g > 0)
+    assert lambda_g > 0
+    assert abs(lambda_s - lambda_g) < 1e-6, (
+        f"Q2 gmres vs spsolve λ diff {abs(lambda_s - lambda_g):.3e} > 1e-6: "
+        f"spsolve={lambda_s:.6f}, gmres={lambda_g:.6f}"
+    )
+
+    # --- (3) record_history=True 產物（9 key + shape + init 語意）---
+    ret_h = nni(
+        AA, m, tol,
+        linear_solver="spsolve",
+        initial_vector=initial_vector,
+        maxit=200,
+        record_history=True,
+    )
+    assert len(ret_h) == 7, f"record_history=True should return 7-tuple, got {len(ret_h)}"
+    lambda_h, x_h, nit_h, lambda_L_h, res_h, lamU_hist_h, history = ret_h
+    assert np.isclose(lambda_h, lambda_s)
+    assert nit_h == nit_s
+    for key in (
+        "x_history", "lambda_U_history", "lambda_L_history", "res_history",
+        "w_history", "y_history",
+        "chit_history", "hit_per_outer_history", "gmres_info_history",
+    ):
+        assert key in history, f"history dict missing key '{key}'"
+
+    # Shapes
+    assert history["x_history"].shape == (n, nit_s + 1)
+    assert history["w_history"].shape == (n, nit_s + 1)
+    assert history["y_history"].shape == (n, nit_s + 1)
+    for key in ("lambda_U_history", "lambda_L_history", "res_history",
+                "chit_history", "hit_per_outer_history"):
+        assert history[key].shape == (nit_s + 1,), f"{key} shape {history[key].shape}"
+
+    # Init-slot [0] 語意
+    assert np.allclose(
+        history["x_history"][:, 0], initial_vector / np.linalg.norm(initial_vector)
+    ), "x_history[:, 0] should be init x / ||init||"
+    assert np.all(np.isnan(history["w_history"][:, 0])), "w_history[:, 0] should be NaN"
+    assert np.all(np.isnan(history["y_history"][:, 0])), "y_history[:, 0] should be NaN"
+    assert history["chit_history"][0] == 0
+    assert history["hit_per_outer_history"][0] == 0
+
+    # canonical NNI.m: halving 註解掉、chit/hit ≡ 0
+    assert np.all(history["chit_history"] == 0), (
+        "canonical NNI.m: chit_history must be all zero (halving disabled)"
+    )
+    assert np.all(history["hit_per_outer_history"] == 0), (
+        "canonical NNI.m: hit_per_outer_history must be all zero"
+    )
+    # spsolve: gmres_info_history = None
+    assert history["gmres_info_history"] is None, (
+        "spsolve branch: gmres_info_history should be None"
+    )
+
+    # final slot 語意
+    assert np.allclose(history["x_history"][:, -1], x_s)
+    assert np.isclose(history["lambda_U_history"][-1], lambda_s)
+    assert np.isclose(history["lambda_L_history"][-1], lambda_L_s)
+
+    # λ_U ≥ λ_L 每 iter 都成立
+    assert np.all(history["lambda_U_history"] >= history["lambda_L_history"]), (
+        "λ_U >= λ_L invariant broken somewhere in history"
+    )
+
+    # --- (4) record_history with gmres：gmres_info_history 是 int64 array ---
+    with _w.catch_warnings():
+        _w.simplefilter("ignore")
+        ret_g = nni(
+            AA, m, tol,
+            linear_solver="gmres",
+            initial_vector=initial_vector,
+            maxit=200,
+            record_history=True,
+        )
+    nit_g_h = ret_g[2]
+    history_g = ret_g[-1]
+    info_hist = history_g["gmres_info_history"]
+    assert info_hist is not None, "gmres branch: gmres_info_history should not be None"
+    assert info_hist.dtype == np.int64, f"gmres_info_history dtype {info_hist.dtype}"
+    assert info_hist.shape == (nit_g_h + 1,)
+    assert info_hist[0] == 0, "init slot gmres_info should be 0"
+
+    # --- (5) Polymorphic A: tensor vs unfolding bit-identical ---
+    AA_dense = AA.toarray() if issparse(AA) else AA
+    T = AA_dense.reshape(n, n, n, order="F")  # m=3
+    lambda_t, x_t, nit_t, lambda_L_t, _, _ = nni(
+        T, m, tol,
+        linear_solver="spsolve",
+        initial_vector=initial_vector,
+        maxit=200,
+    )
+    assert np.isclose(lambda_t, lambda_s, rtol=1e-12), (
+        f"tensor form λ={lambda_t} vs unfolding λ={lambda_s}"
+    )
+    assert np.allclose(x_t, x_s, atol=1e-12), "tensor vs unfolding x mismatch"
+    assert nit_t == nit_s
+
+    # --- (6) Input validation ---
+    # GTH 專屬訊息
+    raised = False
+    try:
+        nni(AA, m, tol, linear_solver="GTH", initial_vector=initial_vector)
+    except ValueError as e:
+        raised = True
+        assert "GTH" in str(e), f"GTH raise message should mention 'GTH', got: {e}"
+    assert raised, "linear_solver='GTH' should raise ValueError"
+
+    # Unknown linear_solver
+    raised = False
+    try:
+        nni(AA, m, tol, linear_solver="superspeed", initial_vector=initial_vector)
+    except ValueError as e:
+        raised = True
+        assert "spsolve" in str(e) or "gmres" in str(e)
+    assert raised, "unknown linear_solver should raise"
+
+    # m not int
+    raised = False
+    try:
+        nni(AA, 3.5, tol, initial_vector=initial_vector)
+    except ValueError as e:
+        raised = True
+        assert "int" in str(e).lower()
+    assert raised, "non-int m should raise"
+
+    # m < 2
+    raised = False
+    try:
+        nni(AA, 1, tol, initial_vector=initial_vector)
+    except ValueError:
+        raised = True
+    assert raised, "m=1 should raise"
+
+    # tol <= 0
+    raised = False
+    try:
+        nni(AA, m, 0.0, initial_vector=initial_vector)
+    except ValueError:
+        raised = True
+    assert raised, "tol=0 should raise"
+
+    # Wrong initial_vector shape
+    raised = False
+    try:
+        nni(AA, m, tol, initial_vector=np.ones(n + 1))
+    except ValueError:
+        raised = True
+    assert raised, "wrong-shape initial_vector should raise"
+
+    # Wrong A shape for given m
+    raised = False
+    try:
+        nni(np.ones((n, n + 1)), m, tol, initial_vector=initial_vector)
+    except ValueError:
+        raised = True
+    assert raised, "incompatible A.shape[1] for m should raise"
+
+    # --- (7) plot_res=True emits warning, doesn't crash ---
+    with _w.catch_warnings(record=True) as caught:
+        _w.simplefilter("always")
+        _ = nni(AA, m, tol, initial_vector=initial_vector, maxit=10, plot_res=True)
+    assert any("plot_res" in str(wi.message) for wi in caught), (
+        "plot_res=True should emit warning"
+    )
+
+    # --- (8) matlab_compat no-op ---
+    lambda_a, x_a, nit_a, *_ = nni(
+        AA, m, tol, initial_vector=initial_vector, matlab_compat=False
+    )
+    lambda_b, x_b, nit_b, *_ = nni(
+        AA, m, tol, initial_vector=initial_vector, matlab_compat=True
+    )
+    assert np.isclose(lambda_a, lambda_b)
+    assert np.allclose(x_a, x_b)
+    assert nit_a == nit_b
+
+    # --- (9) gmres_opts override（shallow-merge）---
+    with _w.catch_warnings():
+        _w.simplefilter("ignore")
+        # 只 override tol、其他用預設
+        lambda_g2, *_ = nni(
+            AA, m, tol,
+            linear_solver="gmres",
+            gmres_opts={"tol": 1e-12},
+            initial_vector=initial_vector,
+            maxit=200,
+        )
+    assert abs(lambda_s - lambda_g2) < 1e-6
+
+    # --- (10) initial_vector 不被 mutate ---
+    iv_before = initial_vector.copy()
+    _ = nni(AA, m, tol, initial_vector=initial_vector)
+    assert np.array_equal(initial_vector, iv_before), (
+        "nni() must not mutate caller's initial_vector"
+    )
+
+    print(
+        f"test_nni_basic passed  "
+        f"(spsolve: nit={nit_s}, λ_U={lambda_s:.6f}, λ_L={lambda_L_s:.6f}, "
+        f"final_res={res_s[-1]:.3e}; "
+        f"gmres vs spsolve λ diff={abs(lambda_s - lambda_g):.3e})"
+    )
+
+
 if __name__ == "__main__":
     test_tenpow_basic()
     test_tpv_basic()
@@ -756,3 +1021,4 @@ if __name__ == "__main__":
     test_sp_Jaco_Ax_basic()
     test_multi_basic()
     test_honi_basic()
+    test_nni_basic()

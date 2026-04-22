@@ -14,11 +14,12 @@ import warnings
 import numpy as np
 from scipy.sparse import (
     csr_matrix,
+    diags as sp_diags,
     eye as sp_eye,
     issparse,
     kron as sp_kron,
 )
-from scipy.sparse.linalg import norm as sparse_norm, spsolve
+from scipy.sparse.linalg import gmres, norm as sparse_norm, spsolve
 
 
 def tenpow(x, p, matlab_compat=False):
@@ -868,4 +869,352 @@ def honi(
     return (
         float(lambda_U), x, nit, int(innit),
         outer_res_history, lambda_history_out,
+    )
+
+
+# ---------------------------------------------------------------------------
+# NNI (Nonnegative Newton Iteration) — Layer 3 step 3/3
+# ---------------------------------------------------------------------------
+
+# gmres default options (user-facing names; translated to scipy's names at call site)
+_NNI_GMRES_DEFAULTS = {"maxit": 1000, "tol": 1e-10, "restart": 20, "M": None}
+
+
+def nni(
+    A, m, tol=1e-12, *,
+    linear_solver="spsolve",
+    gmres_opts=None,
+    maxit=200,
+    initial_vector=None,
+    record_history=False,
+    plot_res=False,
+    matlab_compat=False,
+):
+    """求解 m-order n-dim 正 M-tensor 的最大 eigenvalue + 對應 eigenvector。
+    單層 Newton 迭代（對比 HONI 的外層 λ + 內層 Multi 雙層結構）。
+
+    對應 MATLAB reference：`source_code/Tensor Eigenvalue Problem/2020_HNI_Revised/NNI.m`
+    （271 行、canonical 無 halving 版、`chit ≡ 0`）。演算法結構與陷阱分析見
+    `docs/superpowers/notes/nni_hazard_analysis.md`。
+
+    **前提假設**：輸入 `A` 是**正 M-tensor**（或等價的非負張量）、初始向量 `x_0 > 0`。
+    演算法**不主動投影非負** — 靠 Perron-Frobenius 類性質保證 `x` 在收斂路徑上保持
+    非負。若輸入非 M-tensor、迭代可能 diverge 或 `lambda_L < 0`（此時 `res > 1`、
+    尾端 `assert` 會 fail）、行為與 MATLAB 原碼一致、非 port bug。
+
+    Parameters
+    ----------
+    A : array-like or scipy.sparse matrix
+        Polymorphic（match MATLAB ndim dispatch、同 HONI）：
+        - 2-D `(n, n^(m-1))` — m-tensor 的 mode-1 unfolding，直接使用
+        - m-D `(n, n, ..., n)` — 方張量，內部用 `ten2mat(A, k=0)` 做 mode-1 unfolding
+        sparse 僅支援 2-D unfolding；tensor 必須 dense。
+    m : int
+        Tensor order，`m >= 2`。必須 **int 型別**（`x ** (m-1)` 對負 `x` 取非整數
+        次方會產生 complex；強制 int 避免）。
+    tol : float, default 1e-12
+        外層 Newton 停止門檻（MATLAB default `1e-12`）。
+
+    Keyword-only
+    ------------
+    linear_solver : {"spsolve", "gmres"}, default "spsolve"
+        每 iter 的 sparse 線性系統 `(-M_shifted) · y = x^(m-1)` 求解器：
+        - ``"spsolve"``：scipy `spsolve`（LU、direct）— 對應 MATLAB `mldivide`
+          (`\\`)、適合 dense 或中小 sparse、**parity test 對齊 MATLAB 用此分支**
+        - ``"gmres"``：scipy `gmres`（iterative）— Python-only、適合大 sparse
+          tensor (LU 爆記憶體時)、**不求 bit-identical**、由 sanity test 驗證
+          「兩 solver 給近似 eigenpair」
+
+        MATLAB 原版的 `'GTH'`（Alfa-Xue-Ye M-matrix LU）**未 port** — 傳入會
+        `raise ValueError`，訊息建議改用 `'spsolve'` 或 `'gmres'`。
+    gmres_opts : dict, optional
+        僅在 `linear_solver="gmres"` 時生效。預設 ``None`` 時用
+        `{"maxit": 1000, "tol": 1e-10, "restart": 20, "M": None}`；使用者可傳入
+        部分 key 來 override（與預設 shallow-merge）。Key 語意：
+        - ``maxit`` (int)：GMRES 最大 iteration、對應 scipy 的 ``maxiter``
+        - ``tol`` (float)：相對 tolerance、對應 scipy 的 ``rtol``
+        - ``restart`` (int)：GMRES restart length
+        - ``M`` (LinearOperator or None)：preconditioner、``None`` 為無 precond
+    maxit : int, default 200
+        外層 Newton 硬上限（MATLAB default `100`；本 port 放寬到 200）。
+    initial_vector : array-like 1-D, optional
+        初始 eigenvector 估計，shape `(n,)`。`None` 時用
+        `np.random.default_rng().random(n)`（**parity test 必須顯式傳入**）。
+    record_history : bool, default False
+        True 時回傳 history dict（第 7 個 return value）、含 9 個 key，
+        長度 ``nit + 1``、index [0] 存初始化狀態。
+    plot_res : bool, default False
+        **不實作**（同 HONI）；kwarg 保留以維持 API 可擴充；傳 True 會
+        `warnings.warn` 後忽略。
+    matlab_compat : bool, default False
+        **對 nni 本身是 no-op**；會傳進 `tpv / sp_Jaco_Ax / ten2mat`。
+
+    Returns
+    -------
+    若 `record_history=False`：
+        `(lambda_U, x, nit, lambda_L, outer_res_history, lambda_U_history)` — 6-tuple
+        - ``lambda_U`` : float — 最大 eigenvalue 估計（λ 上界）
+        - ``x`` : np.ndarray, 1-D `(n,)` — 對應 unit-norm eigenvector
+        - ``nit`` : int — 外層 iter 完成次數（**Python 0-based**、MATLAB `nit_mat = nit + 1`）
+        - ``lambda_L`` : float — 最小 eigenvalue 估計（λ 下界、res = 1 - λ_L/λ_U）
+        - ``outer_res_history`` : np.ndarray, 1-D, length `nit + 1` — 每 iter 相對殘差
+        - ``lambda_U_history`` : np.ndarray, 1-D, length `nit + 1` — 每 iter λ_U
+
+    若 `record_history=True`：回傳 7-tuple `(..., history)`，history 是 dict：
+        - ``x_history`` : `(n, nit+1)`
+        - ``lambda_U_history`` : `(nit+1,)`
+        - ``lambda_L_history`` : `(nit+1,)`
+        - ``res_history`` : `(nit+1,)`
+        - ``w_history`` : `(n, nit+1)` — 每 iter 的 RHS `x^(m-1)`；[:, 0] = NaN
+        - ``y_history`` : `(n, nit+1)` — 每 iter 正規化 Newton 方向 `y = w_raw / ||w_raw||`；[:, 0] = NaN
+        - ``chit_history`` : `(nit+1,)` — 累積 halving 計數（**canonical 永遠 0**）
+        - ``hit_per_outer_history`` : `(nit+1,)` — 每 iter 的 halving 計數（**canonical 永遠 0**）
+        - ``gmres_info_history`` : `(nit+1,) of int64` 若 ``linear_solver="gmres"``、否則 ``None``
+
+    §四 Hazard checklist（手眼同步點、逐條核對 — 詳見 nni_hazard_analysis.md §四）
+    --------------------------------------------------------------------------
+    1. **假設 input 是正 M-tensor**、`x > 0` 沿 iteration 保持、**不主動投影** — §五.1
+    2. **`diag(x^(m-2))` 用 `scipy.sparse.diags`**（不用 `np.diag`、避免大 dense 爆
+       記憶體）、`M_shifted = B - (m-1)*λ_U*D` 整路 sparse — §四.5.1 + §五.2
+    3. **`step_length` 無 halving 等價版**（MATLAB line 174-186 整塊註解）：
+       `θ=1; x_new = (m-2)*x + y; x_new /= ||x_new||; recompute temp, λ_U, λ_L`；
+       `hit ≡ 0`、`chit ≡ 0` — §五.5
+    4. **`res = ones(maxit)` pre-fill = 1.0 的 assertion** 在收尾前加、對應 Q6；
+       `lambda_L < 0` 時 `res > 1`、pre-fill 策略失效、assert fail — §五.3
+
+    §五 NNI 專屬 fragility
+    ---------------------
+    當 `x_i → 0` 且 `m ≥ 3`、`x_i^(m-2) → 0`、`diag(x^(m-2))` 第 i 個對角元素 → 0、
+    `M_shifted` 在第 i 列 **row-wise ill-conditioned**（對比 HONI 的 `λ_U*II - AA`
+    是均勻 shift、收斂尾段 global near-singular）。若 parity test 看到 `w/y_history`
+    在收斂尾段 rel error 爆、套 HONI 的三 Tier 框架（rtol fallback）。詳見
+    `memory/feedback_honi_multi_fragility_propagation.md`。
+
+    Raises
+    ------
+    ValueError
+        - `m` 不是 int 或 `m < 2`
+        - `tol <= 0`
+        - `linear_solver` 不是 `'spsolve'` / `'gmres'`（特別處理 `'GTH'` 訊息）
+        - `gmres` 回傳 `info < 0`（illegal input）
+        - polymorphic A 的 shape 與 m 不相容
+    AssertionError
+        收尾 sanity：`res[:nit+1] <= 1.0 + 1e-10`。失敗表示 `lambda_L < 0`、AA 不
+        是 clean M-tensor、pre-fill 策略假設破裂。
+    """
+    # ---- Input validation ----
+    if linear_solver == "GTH":
+        raise ValueError(
+            "GTH solver not ported; use 'spsolve' or 'gmres' instead"
+        )
+    if linear_solver not in ("spsolve", "gmres"):
+        raise ValueError(
+            f"linear_solver must be 'spsolve' or 'gmres', got {linear_solver!r}"
+        )
+    if not isinstance(m, (int, np.integer)):
+        raise ValueError(f"m must be int, got {type(m).__name__}")
+    m = int(m)
+    if m < 2:
+        raise ValueError(f"m must be >= 2, got {m}")
+    if tol <= 0:
+        raise ValueError(f"tol must be > 0, got {tol}")
+    if maxit < 2:
+        raise ValueError(f"maxit must be >= 2, got {maxit}")
+
+    # ---- gmres options merge (user-facing names → scipy names at call site) ----
+    if linear_solver == "gmres":
+        opts = dict(_NNI_GMRES_DEFAULTS)
+        if gmres_opts is not None:
+            opts.update(gmres_opts)
+    else:
+        opts = None
+
+    # ---- Polymorphic A dispatch (same as HONI) ----
+    if issparse(A):
+        if A.ndim != 2:
+            raise ValueError(f"sparse A must be 2-D unfolding, got ndim={A.ndim}")
+        n = A.shape[0]
+        if A.shape[1] != n ** (m - 1):
+            raise ValueError(
+                f"sparse A shape {A.shape} incompatible with m={m}; "
+                f"expected ({n}, {n ** (m - 1)})"
+            )
+        AA = A
+    else:
+        A_arr = np.asarray(A)
+        if A_arr.ndim == 2:
+            n = A_arr.shape[0]
+            if A_arr.shape[1] != n ** (m - 1):
+                raise ValueError(
+                    f"A shape {A_arr.shape} incompatible with m={m}; "
+                    f"expected ({n}, {n ** (m - 1)})"
+                )
+            AA = A_arr
+        elif A_arr.ndim >= 3:
+            n = A_arr.shape[0]
+            if A_arr.ndim != m:
+                raise ValueError(
+                    f"tensor A.ndim={A_arr.ndim} but m={m} (need ndim == m)"
+                )
+            if not all(s == n for s in A_arr.shape):
+                raise ValueError(
+                    f"A must be square tensor (all dims == n={n}), got shape {A_arr.shape}"
+                )
+            AA = ten2mat(A_arr, k=0, matlab_compat=matlab_compat)
+        else:
+            raise ValueError(
+                f"A must be 2-D unfolding or m-D tensor, got ndim={A_arr.ndim}"
+            )
+
+    # ---- Initial vector ----
+    if initial_vector is None:
+        rng = np.random.default_rng()
+        initial_vector = rng.random(n)
+    else:
+        initial_vector = np.asarray(initial_vector, dtype=np.float64).ravel()
+        if initial_vector.shape != (n,):
+            raise ValueError(
+                f"initial_vector shape {initial_vector.shape} != ({n},)"
+            )
+
+    if plot_res:
+        warnings.warn(
+            "plot_res is not implemented in this port; ignoring",
+            stacklevel=2,
+        )
+
+    # ---- 初始化 (NNI.m line 29-41) ----
+    x = initial_vector / np.linalg.norm(initial_vector)                          # line 31-32
+    temp = tpv(AA, x, m, matlab_compat=matlab_compat) / (x ** (m - 1))           # line 33
+    lambda_U = float(np.max(temp))                                                # line 34
+    lambda_L = float(np.min(temp))                                                # line 35
+
+    res = np.ones(maxit, dtype=np.float64)                                        # line 38 (res pre-fill)
+    res[0] = (lambda_U - lambda_L) / lambda_U                                    # line 39 (0-based)
+    nit = 0                                                                        # MATLAB nit=1 → 0-based
+    chit = 0                                                                       # line 41 (canonical NNI.m: halving disabled → always 0)
+
+    # ---- history buffers (always track lambda histories; others if record_history) ----
+    lambda_U_history = np.full(maxit, np.nan, dtype=np.float64)
+    lambda_U_history[0] = lambda_U
+    lambda_L_history = np.full(maxit, np.nan, dtype=np.float64)
+    lambda_L_history[0] = lambda_L
+
+    if record_history:
+        x_history = np.zeros((n, maxit), dtype=np.float64)
+        x_history[:, 0] = x
+        w_history = np.full((n, maxit), np.nan, dtype=np.float64)
+        y_history = np.full((n, maxit), np.nan, dtype=np.float64)
+        chit_history = np.zeros(maxit, dtype=np.float64)
+        hit_per_outer_history = np.zeros(maxit, dtype=np.float64)
+        if linear_solver == "gmres":
+            gmres_info_history = np.zeros(maxit, dtype=np.int64)
+        else:
+            gmres_info_history = None
+
+    _MAX_NIT = maxit - 1  # Python 0-based; MATLAB `nit < maxit` ≡ Python `nit < maxit - 1`
+
+    # ---- 外層 Newton 迴圈 (NNI.m line 42-75) ----
+    while np.min(res) > tol and nit < _MAX_NIT:
+        nit += 1                                                                  # line 43
+
+        # Jacobian + shifted matrix (NNI.m line 44, 46)
+        B = sp_Jaco_Ax(AA, x, m, matlab_compat=matlab_compat)                     # line 44
+        D = sp_diags(x ** (m - 2))                                                # §四 checklist #2: sparse, not np.diag
+        M_shifted = B - (m - 1) * lambda_U * D                                    # line 46
+
+        # RHS: x^(m-1) (NNI.m line 49)
+        w_rhs = x ** (m - 1)
+
+        # Linear solve: y_raw = (-M_shifted) \ w_rhs  (note the MINUS sign, line 49)
+        if linear_solver == "spsolve":
+            y_raw = spsolve((-M_shifted).tocsc(), w_rhs)
+        else:  # "gmres"
+            y_raw, info = gmres(
+                -M_shifted, w_rhs,
+                rtol=opts["tol"],
+                atol=0.0,
+                restart=opts["restart"],
+                maxiter=opts["maxit"],
+                M=opts["M"],
+            )
+            if info < 0:
+                raise ValueError(
+                    f"gmres illegal input at outer iter {nit} (info={info})"
+                )
+            if info > 0:
+                warnings.warn(
+                    f"gmres did not converge in {opts['maxit']} iters at "
+                    f"outer iter {nit} (info={info})",
+                    stacklevel=2,
+                )
+            if record_history:
+                gmres_info_history[nit] = info
+
+        # Normalize Newton direction (NNI.m line 56)
+        y = y_raw / np.linalg.norm(y_raw)
+
+        # step_length 無 halving 等價版 (NNI.m line 169 + halving 174-186 commented)
+        # §四 checklist #3: theta=1; x_new = (m-2)*x + y; normalize; recompute temp/λ_U/λ_L
+        # NOTE 一般式 (m-2)*x + y；m=3 退化成 x + y、m=2 退化成 y (不 special case、同 Q5 決定)
+        x_new = (m - 2) * x + y
+        x_new = x_new / np.linalg.norm(x_new)
+        temp = tpv(AA, x_new, m, matlab_compat=matlab_compat) / (x_new ** (m - 1))
+        lambda_U_new = float(np.max(temp))
+        lambda_L_new = float(np.min(temp))
+        hit = 0                                                                   # canonical NNI.m: halving disabled
+        chit += hit
+
+        # Update state
+        x = x_new
+        lambda_U = lambda_U_new
+        lambda_L = lambda_L_new
+
+        # Residual (NNI.m line 63)
+        res[nit] = (lambda_U - lambda_L) / lambda_U
+
+        # History tracking
+        lambda_U_history[nit] = lambda_U
+        lambda_L_history[nit] = lambda_L
+        if record_history:
+            x_history[:, nit] = x
+            w_history[:, nit] = w_rhs
+            y_history[:, nit] = y
+            hit_per_outer_history[nit] = hit
+            chit_history[nit] = chit
+
+    # ---- Upper-bound sanity: pre-fill value 1.0 must bound all written res ----
+    # §四 checklist #4: fail 表示 lambda_L < 0、AA 非 clean M-tensor、pre-fill 策略失效
+    assert np.all(res[:nit + 1] <= 1.0 + 1e-10), (
+        f"res upper-bound violation: max res[:{nit+1}] = {res[:nit+1].max():.6e}, "
+        f"pre-fill was 1.0 (should hold for clean M-tensor with lambda_L >= 0)"
+    )
+
+    outer_res_history = res[:nit + 1].copy()
+    lambda_U_history_out = lambda_U_history[:nit + 1].copy()
+    lambda_L_history_out = lambda_L_history[:nit + 1].copy()
+
+    if record_history:
+        history = {
+            "x_history": x_history[:, :nit + 1].copy(),
+            "lambda_U_history": lambda_U_history_out.copy(),
+            "lambda_L_history": lambda_L_history_out.copy(),
+            "res_history": outer_res_history.copy(),
+            "w_history": w_history[:, :nit + 1].copy(),
+            "y_history": y_history[:, :nit + 1].copy(),
+            "chit_history": chit_history[:nit + 1].copy(),
+            "hit_per_outer_history": hit_per_outer_history[:nit + 1].copy(),
+            "gmres_info_history": (
+                gmres_info_history[:nit + 1].copy()
+                if gmres_info_history is not None else None
+            ),
+        }
+        return (
+            float(lambda_U), x, nit, float(lambda_L),
+            outer_res_history, lambda_U_history_out, history,
+        )
+
+    return (
+        float(lambda_U), x, nit, float(lambda_L),
+        outer_res_history, lambda_U_history_out,
     )
