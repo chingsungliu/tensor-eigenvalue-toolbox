@@ -1,7 +1,7 @@
 # PROGRESS.md — Session checkpoint
 
-**最後更新**：2026-04-22（Day 2 收工）
-**狀態**：21 commits on `main`、working tree clean、無未 commit 變更
+**最後更新**：2026-04-22（Day 3 收工）
+**狀態**：Layer 3（Multi + HONI）完整完成、HNI 系統 port 全綠、待決定 Layer 4 整合 vs NNI canonical port
 
 ---
 
@@ -115,12 +115,72 @@ Fragility 寫進 `memory/feedback_multi_halving_fragility.md`（Day 2 新增第 
 
 ---
 
-## Git state（21 commits、Day 2 新增 4 筆）
+## Day 2 末（2026-04-22 evening）+ Day 3 (2026-04-22) 完成摘要
 
-Day 2 新增（topmost）：
+### 一、HNI Layer 3 step 2/2（HONI port）完成
+
+HONI.m（232 行、外層 eigenvalue iteration + 內層呼叫 Multi）完整 port 到 Python，**exact 與 inexact 兩個分支**都通過三層 tier parity（PASS condition：Tier 1 + Tier 2 全過）。
+
+| Tier | 度量類型 | 容差 | 對象欄位 |
+|---|---|---|---|
+| **1 STRICT** | abs | `1e-10` | final λ / final x、`x_history`、`lambda_history`、`res`、`inner_tol_history`、`chit_history`、`hal_per_outer_history`（slots 0..K-2） |
+| **1 STRICT** | **rel** | `1e-8` | **`y_history`**（slots 1..K-2、量級隨 `lambda_U → eigenvalue` 指數放大、必須用相對誤差） |
+| **2 APPROX** | rel | `1e-2` | `y_history[:, K-1]`（last-iter shift-invert near-singular fragility 爆點） |
+| **3 INFO** | — | no-assert | last-iter `chit/hal_per_outer/hal_accum`、`nit/innit/hal` scalars（fragility 傳播後的計數差） |
+
+**兩分支實測 fragility**（HONI Q5 case，m=3、n=10、rng(42) initial vector）：
+
+| 分支 | y_history strict 段 max rel | y_history Tier 2 last-iter rel | 最終 λ / x |
+|---|---|---|---|
+| `exact` | ~5e-12 (machine eps) | **2.1e-5** | bit-identical（abs ≤ 1e-10） |
+| `inexact` | up to ~5e-9 at iter 4 | **1.1e-3** | bit-identical（abs ≤ 1e-10） |
+
+**Fragility 根因**：`lambda_U` 收斂到真特徵值時，`lambda_U * II - AA` 變 near-singular、內層 Multi 解出的 `y` 量級從 O(1) → O(10^6)、scipy `spsolve` (SuperLU) vs MATLAB `mldivide` (LU) 的 pivot 差在這個 ill-conditioned 區段被放大。**inexact 比 exact ~50× 敏感**，因為 `lambda_U = max(temp)` 整個重算 vs `lambda_U -= min(temp)^(m-1)` 增量更新；增量自帶 damping、重算把 y 的相對誤差直接餵下一輪。
+
+詳細分析見 `memory/feedback_honi_multi_fragility_propagation.md`（Day 3 新增、第 9 條 memory）。
+
+**Port 檔案**：
+- `python/tensor_utils.py::honi` — exact + inexact 兩分支、polymorphic A（2-D unfolding 或 m-D tensor）、`record_history` flag、9 個外層 history 欄位
+- `python/test_tensor_utils.py::test_honi_basic` 等 — Python-only sanity（不依賴 MATLAB）
+- `python/test_honi_parity.py` — 三 tier parity 框架、兩 case（exact + inexact）各跑一次
+- `matlab_ref/hni/HONI_with_history.m` — HONI.m 逐字複本 + 9 欄 history output
+- `matlab_ref/hni/generate_honi_reference.m` — 兩 case 驅動，輸出 `honi_reference_exact.mat` + `honi_reference_inexact.mat`
+
+Port 前的 hazard analysis：`docs/superpowers/notes/honi_hazard_analysis.md`（Day 2 末產出、352 行、含 8 個 open questions 全部由使用者決定）。
+
+### 二、Memory 寫入（Day 3 結束時 9 條）
+
+比 Day 2 多一條：
+| Memory 檔 | type | 說明 |
+|---|---|---|
+| `feedback_honi_multi_fragility_propagation.md` | feedback | **Day 3 新增**：HONI+Multi 在 near-singular shift-invert 的 fragility 傳播；y-like 欄位 parity 必須 rtol；inexact 分支 ~50× 比 exact 敏感；最終 λ/x 仍 bit-identical；三 Tier 框架可重用於任何 shift-invert 類迭代演算法 |
+
+### 三、HNI 系統里程碑文件
+
+新增 `docs/hni_status.md`（繁體中文）— Layer 1/2/3 完整狀態、parity 結果表（含 Tier 機制）、已知 fragility 摘要（halving + shift-invert）、下一步 scope。供使用者隨時 1 分鐘對齊 HNI 進度，**不重複 PROGRESS.md 的 session 紀錄**、focus 在「系統現況」。
+
+---
+
+## Git state（Day 3 收工）
+
+Day 3 新增（topmost、3 筆）：
 
 ```
-<pending> Update PROGRESS.md and CLAUDE.md after Multi port completion   ← 本 commit
+<pending3> Add HNI system-level status document after Layer 3 complete   ← 本批最後 commit
+<pending2> Update CLAUDE.md context loader for Day 3
+<pending1> Update PROGRESS.md after Day 2 session (Layer 3 complete)
+```
+
+Day 2 末（HONI 收工、未及時更新 PROGRESS）：
+
+```
+ccbe5c4 Port HONI (exact + inexact) to Python with tiered parity validation (Layer 3 step 2/2)
+```
+
+Day 2 中段（Multi port、含當時的 PROGRESS update）：
+
+```
+d5c6885 Update PROGRESS.md and CLAUDE.md after Multi port completion
 3269ab7 Simplify multi_reference to Q5-only; document halving fragility
 21ca097 Port Multi to Python with per-iteration parity validation (Layer 3 step 1/2)
 8288758 Add CLAUDE.md as project-level context loader for new sessions
@@ -150,24 +210,46 @@ d7af773 Initial toolbox: gaussian_blur port with parity validation
 
 ---
 
-## 下一個動作：Session 3 = Port `HONI`（Layer 3 step 2/3）
+## 下一個動作：Session 4 — 二選一（待使用者決定）
 
-**為什麼 HONI 緊接 Multi**：
-- Multi 是 HONI 的內層 solver、Multi port 已完成 + parity 到 machine epsilon
-- HONI 會在外層 eigenvalue iteration 中**自然呼叫 Multi**，halving path 會在 HONI 的「困難 iter」被觸發 — 這是 Multi halving 被設計要 cover 的 regime（見 `memory/feedback_multi_halving_fragility.md`）
-- HONI 完成後才有完整的 eigenvalue 解算、Streamlit demo 才能加新 tile
+### 選項 A：Layer 4 整合（Streamlit demo 加 Multi + HONI 兩個 renderer）
 
-**檔案**：`matlab_ref/hni/HONI.m`
+**為什麼**：
+- HNI 系統 Layer 1/2/3 全部 port 完、parity 全綠 → 把使用者面向的 demo 補齊、HNI 的「可瀏覽器互動」價值才實現
+- 新增 2 個 renderer（Multi 一個、HONI 一個），照 demo_v0 已驗證的 §9 擴充 contract（4 處改動：import / helper / renderer / dict 行）
+- Multi renderer：左欄輸入 m / n / tol、右欄印 nit、residual decay、最終 u（plot u_history 收斂軌跡）
+- HONI renderer：左欄輸入 m / n / tol / linear_solver、右欄印 lambda、x、收斂曲線；可選擇 exact / inexact 對比
 
-**預計工作量**：2-3 小時
-- HONI 外層結構預計約 150-200 行 MATLAB（比 Multi 大）
-- 主要 port 風險類型跟 Multi 類似（iteration control flow + 可能有 column-major 在 unfolding 處理）
-- Multi 已 port、Multi 的 5 個 dependency 都已 port、所以 HONI 只需 port 自身外層結構 + possibly 新 helper
+**預計工作量**：1.5-2 小時（demo 已成熟、純擴充）
 
-**執行前應做的事（建議）**：
-- 先寫 HONI hazard analysis（類似 Multi 的 A 階段），放 `docs/superpowers/notes/honi_hazard_analysis.md`
-- 逐行找 HONI.m 裡的 indexing / reshape / control-flow / sparse dispatch 陷阱
-- 先列 open questions、讓使用者決定後再動手實作
+**產出**：`python/streamlit_app/demo_v0.py` 從 6 函式擴到 8 函式；HNI 線端到端可 demo
+
+---
+
+### 選項 B：NNI canonical port（HNI 並列演算法）
+
+**為什麼**：
+- NNI（Non-negative tensor Iteration）是 HNI 的兄弟線、同樣解非負張量最大特徵值、但 algorithm 完全不同
+- canonical 候選 + 版本 inventory 已在 `matlab_ref/NNI_HNI_inventory.md` Section H 列出、待使用者拍板
+- 一旦 NNI 也 port 完、可在 demo 對比 HNI vs NNI 的收斂行為（同一 AA 兩個演算法）
+
+**預計工作量**：unknown — 取決於 canonical 版本的複雜度
+- 階段 A：確認 NNI canonical 版本（使用者決定）+ hazard analysis
+- 階段 B：port + parity（依 Multi/HONI 經驗、預計 4-8 小時）
+
+**產出**：`python/tensor_utils.py::nni`（或拆檔）+ parity test + hazard analysis 文件
+
+---
+
+### 對比（給使用者決策參考）
+
+| 維度 | A：Layer 4 整合 | B：NNI port |
+|---|---|---|
+| 工作量 | 短（1.5-2h） | 中-長（4-8h） |
+| 風險 | 低（demo pattern 已驗證） | 中（新演算法、新陷阱） |
+| 立即價值 | HNI 線可瀏覽器 demo | 工具箱演算法庫 +1 |
+| 適合時機 | 想看 HNI 階段成果 | 想推進 port 廣度 |
+| 後續解鎖 | NNI 完成後可加進同一 demo | 完成 + 整合後可 HNI vs NNI 對比 demo |
 
 ---
 
@@ -183,10 +265,11 @@ claude
 > 我回來了。用 `git log --oneline` 看進度、`cat PROGRESS.md` 看下個動作。
 
 Claude 會：
-1. 讀 PROGRESS.md 了解 Day 1 + Day 2 完整狀態
-2. 讀 memory（8 條、可主動 Read）
-3. 確認下一個動作是 Port HONI（或使用者指定其他方向）
-4. 在使用者同意後啟動 Session 3
+1. 讀 PROGRESS.md 了解 Day 1 + Day 2 + Day 3 完整狀態
+2. 讀 memory（9 條、可主動 Read）
+3. 看 `docs/hni_status.md` 了解 HNI 系統現況（1 分鐘）
+4. 確認下一個動作是 A 或 B（或使用者指定其他方向）
+5. 在使用者同意後啟動 Session 4
 
 ---
 
@@ -212,8 +295,9 @@ Claude 會：
 - [x] per-iteration parity 框架 POC 驗證
 - [x] Layer 3 Multi port（Day 2 完成、Q5 parity 到 machine epsilon）
 - [x] halving fragility 分析 + 延後策略記錄
-- [x] memory 寫入（8 條）
-- [x] Git working tree clean
-- [ ] Layer 3 HONI port（Session 3）
-- [ ] Layer 3 整合 + demo 加 Multi/HONI
-- [ ] NNI canonical 決策 + port
+- [x] Layer 3 HONI port（Day 2 末完成、exact + inexact 通過 tier parity）
+- [x] shift-invert fragility 分析 + 三 Tier 框架記錄
+- [x] memory 寫入（9 條）
+- [x] HNI 系統 milestone 文件（`docs/hni_status.md`）
+- [ ] Layer 4：demo 加 Multi + HONI（選項 A）
+- [ ] NNI canonical 決策 + port（選項 B）
