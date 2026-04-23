@@ -884,6 +884,8 @@ def nni(
     A, m, tol=1e-12, *,
     linear_solver="spsolve",
     gmres_opts=None,
+    halving=False,
+    tol_theta=1e-12,
     maxit=200,
     initial_vector=None,
     record_history=False,
@@ -893,9 +895,16 @@ def nni(
     """求解 m-order n-dim 正 M-tensor 的最大 eigenvalue + 對應 eigenvector。
     單層 Newton 迭代（對比 HONI 的外層 λ + 內層 Multi 雙層結構）。
 
-    對應 MATLAB reference：`source_code/Tensor Eigenvalue Problem/2020_HNI_Revised/NNI.m`
-    （271 行、canonical 無 halving 版、`chit ≡ 0`）。演算法結構與陷阱分析見
-    `docs/superpowers/notes/nni_hazard_analysis.md`。
+    對應 MATLAB reference（兩個檔、由 `halving` kwarg 切換）：
+    - `source_code/Tensor Eigenvalue Problem/2020_HNI_Revised/NNI.m`
+      — 270 行、canonical（halving while 整塊註解）、`chit ≡ 0`、對應 `halving=False`
+    - `source_code/Tensor Eigenvalue Problem/2020_HNI_Revised/NNI_ha.m`
+      — 270 行、halving 啟用版（2020 paper `Test_Heig2.m` benchmark 實際呼叫）、
+      對應 `halving=True`
+
+    兩檔 diff 100% 集中在 `step_length` subfunction、純 halving-only 差異
+    （Phase 0 驗證）。演算法結構與陷阱分析見
+    `docs/superpowers/notes/nni_hazard_analysis.md`；halving 擴展與風險見同檔 §九。
 
     **前提假設**：輸入 `A` 是**正 M-tensor**（或等價的非負張量）、初始向量 `x_0 > 0`。
     演算法**不主動投影非負** — 靠 Perron-Frobenius 類性質保證 `x` 在收斂路徑上保持
@@ -935,6 +944,17 @@ def nni(
         - ``tol`` (float)：相對 tolerance、對應 scipy 的 ``rtol``
         - ``restart`` (int)：GMRES restart length
         - ``M`` (LinearOperator or None)：preconditioner、``None`` 為無 precond
+    halving : bool, default False
+        Step-length halving line search 開關（§九 addendum）：
+        - ``False`` — 對應 canonical `NNI.m`；full step `x_new = (m-2)*x + y`、無條件接受、
+          `hit_per_outer_history` 恆 0（halving path 在 MATLAB 端被 `%` 註解）
+        - ``True`` — 對應 `NNI_ha.m`；先算 full step、若 `lambda_U_new > lambda_U + 1e-13`
+          （單調性破壞）則進 halving while、每次 `theta /= 2` 重算 `x_new / λ_U / λ_L`、
+          直到 `lambda_U_new <= lambda_U + 1e-13` 或 `theta < tol_theta` 為止
+    tol_theta : float, default 1e-12
+        Halving while 的 `theta` 下限；**`halving=False` 時無作用**。Default `1e-12`
+        對應 `NNI_ha.m` line 166 實際值（不是 `NNI.m` line 166 的 `1e-8`、那是 dead code：
+        NNI.m 的 halving while 在註解裡、`tol_theta` 從未被 evaluated）。
     maxit : int, default 200
         外層 Newton 硬上限（MATLAB default `100`；本 port 放寬到 200）。
     initial_vector : array-like 1-D, optional
@@ -967,8 +987,11 @@ def nni(
         - ``res_history`` : `(nit+1,)`
         - ``w_history`` : `(n, nit+1)` — 每 iter 的 RHS `x^(m-1)`；[:, 0] = NaN
         - ``y_history`` : `(n, nit+1)` — 每 iter 正規化 Newton 方向 `y = w_raw / ||w_raw||`；[:, 0] = NaN
-        - ``chit_history`` : `(nit+1,)` — 累積 halving 計數（**canonical 永遠 0**）
-        - ``hit_per_outer_history`` : `(nit+1,)` — 每 iter 的 halving 計數（**canonical 永遠 0**）
+        - ``chit_history`` : `(nit+1,)` — 累積 halving 計數；
+          ``halving=False`` 恆 0（canonical），``halving=True`` 為跨 outer iter 的累積值
+        - ``hit_per_outer_history`` : `(nit+1,)` — 每 iter 的 halving 計數；
+          ``halving=False`` 恆 0（canonical），``halving=True`` 記第 i 次 outer iter 進
+          halving while 的次數（§九 Q2/Q3：dead → live 欄位語意轉換、保留欄位名不改）
         - ``gmres_info_history`` : `(nit+1,) of int64` 若 ``linear_solver="gmres"``、否則 ``None``
 
     §四 Hazard checklist（手眼同步點、逐條核對 — 詳見 nni_hazard_analysis.md §四）
@@ -976,9 +999,13 @@ def nni(
     1. **假設 input 是正 M-tensor**、`x > 0` 沿 iteration 保持、**不主動投影** — §五.1
     2. **`diag(x^(m-2))` 用 `scipy.sparse.diags`**（不用 `np.diag`、避免大 dense 爆
        記憶體）、`M_shifted = B - (m-1)*λ_U*D` 整路 sparse — §四.5.1 + §五.2
-    3. **`step_length` 無 halving 等價版**（MATLAB line 174-186 整塊註解）：
-       `θ=1; x_new = (m-2)*x + y; x_new /= ||x_new||; recompute temp, λ_U, λ_L`；
-       `hit ≡ 0`、`chit ≡ 0` — §五.5
+    3. **`step_length` 兩個分支**（由 `halving` kwarg 切換）：
+       - `halving=False`（NNI.m 原 line 174-186 整塊註解）：
+         `θ=1; x_new = (m-2)*x + y; normalize; recompute temp, λ_U, λ_L; hit = 0`
+       - `halving=True`（NNI_ha.m 原 line 174-186 active）：
+         先 full step、若 `λ_U_new - λ_U > 1e-13` 則進 halving while（`θ /= 2`、
+         重算 x_new / λ_U / λ_L、每 iter `hit += 1`、`θ < tol_theta` 時 `warnings.warn` 並 break）
+       兩分支 `chit += hit`、`hit_per_outer_history[nit] = hit` 行為統一 — §五.5 + §九
     4. **`res = ones(maxit)` pre-fill = 1.0 的 assertion** 在收尾前加、對應 Q6；
        `lambda_L < 0` 時 `res > 1`、pre-fill 策略失效、assert fail — §五.3
 
@@ -989,6 +1016,15 @@ def nni(
     是均勻 shift、收斂尾段 global near-singular）。若 parity test 看到 `w/y_history`
     在收斂尾段 rel error 爆、套 HONI 的三 Tier 框架（rtol fallback）。詳見
     `memory/feedback_honi_multi_fragility_propagation.md`。
+
+    §九 Halving break caveat（僅 `halving=True` 時可能出現）
+    -------------------------------------------------------
+    當 halving while 因 `theta < tol_theta` break 時、返回的 `lambda_U_new` 可能仍
+    `> lambda_U + 1e-13`（單調性被破壞）。`NNI_ha.m` main loop line 60 的 call site
+    `[x, lambda_U, ...] = step_length(...)` **無 fallback 邏輯**、直接接受這個非單調值
+    繼續下一輪 outer iteration、可能進入震盪或使 `res > 1` 觸發尾端 assert fail。
+    此為 MATLAB NNI_ha.m 原碼行為、port 逐字照抄、**非 bug**。Python 端會在每次
+    break 時發 `RuntimeWarning`（帶 outer iter 編號、方便 parity test 定位）。
 
     Raises
     ------
@@ -1154,15 +1190,45 @@ def nni(
         # Normalize Newton direction (NNI.m line 56)
         y = y_raw / np.linalg.norm(y_raw)
 
-        # step_length 無 halving 等價版 (NNI.m line 169 + halving 174-186 commented)
-        # §四 checklist #3: theta=1; x_new = (m-2)*x + y; normalize; recompute temp/λ_U/λ_L
-        # NOTE 一般式 (m-2)*x + y；m=3 退化成 x + y、m=2 退化成 y (不 special case、同 Q5 決定)
-        x_new = (m - 2) * x + y
-        x_new = x_new / np.linalg.norm(x_new)
-        temp = tpv(AA, x_new, m, matlab_compat=matlab_compat) / (x_new ** (m - 1))
-        lambda_U_new = float(np.max(temp))
-        lambda_L_new = float(np.min(temp))
-        hit = 0                                                                   # canonical NNI.m: halving disabled
+        # step_length (NNI.m / NNI_ha.m line 148-187) — halving kwarg 切換兩分支
+        # §四 checklist #3; §九 addendum (Phase 1) 詳述選項 A kwarg 設計
+        # 一般式 (m-2)*x + y；m=3 退化成 x + y、m=2 退化成 y (不 special case、同 Q5 決定)
+        if not halving:
+            # --- canonical NNI.m: full step、無條件接受、hit≡0 (halving 在 MATLAB 端註解掉) ---
+            x_new = (m - 2) * x + y
+            x_new = x_new / np.linalg.norm(x_new)
+            temp = tpv(AA, x_new, m, matlab_compat=matlab_compat) / (x_new ** (m - 1))
+            lambda_U_new = float(np.max(temp))
+            lambda_L_new = float(np.min(temp))
+            hit = 0
+        else:
+            # --- NNI_ha.m: full-step overshoot (λ_U_new > λ_U + 1e-13) → halve theta ---
+            # 逐行 mirror NNI_ha.m line 167-186、順序不動（hit++ 必須在 λ 更新之後、
+            # 在 tol_theta break check 之前；這順序決定 break 時的 hit 值、parity 關鍵）
+            hit = 0
+            theta = 1.0
+            x_new = (m - 2) * x + theta * y                                       # full step
+            x_new = x_new / np.linalg.norm(x_new)
+            temp = tpv(AA, x_new, m, matlab_compat=matlab_compat) / (x_new ** (m - 1))
+            lambda_U_new = float(np.max(temp))
+            lambda_L_new = float(np.min(temp))
+            while lambda_U_new - lambda_U > 1e-13:
+                theta = theta / 2.0
+                x_new = (m - 2) * x + theta * y
+                x_new = x_new / np.linalg.norm(x_new)
+                temp = tpv(AA, x_new, m, matlab_compat=matlab_compat) / (x_new ** (m - 1))
+                lambda_U_new = float(np.max(temp))
+                lambda_L_new = float(np.min(temp))
+                hit += 1
+                if theta < tol_theta:
+                    warnings.warn(
+                        f"NNI_ha halving break at outer iter {nit}: can't find a "
+                        f"suitable theta (theta={theta:.3e} < tol_theta={tol_theta:.0e}); "
+                        f"returning non-monotone lambda_U (see nni_hazard_analysis.md §九)",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+                    break
         chit += hit
 
         # Update state

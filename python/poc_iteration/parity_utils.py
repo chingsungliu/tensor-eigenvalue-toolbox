@@ -80,9 +80,14 @@ def report(result, tolerance=TOLERANCE):
 
 
 def print_neighborhood(matlab_seq, python_seq, center, radius=2, label="seq"):
-    """Show per-iteration values around the divergence point for context."""
+    """Show per-iteration values around the divergence point for context.
+
+    Clips the window to ``min(len(matlab_seq), len(python_seq))`` so the two
+    sequences can legitimately have different lengths (common when Python
+    stops earlier than MATLAB, or the overlap has already been truncated).
+    """
     lo = max(0, center - radius)
-    hi = min(len(matlab_seq), center + radius + 1)
+    hi = min(len(matlab_seq), len(python_seq), center + radius + 1)
     print(f"\n  --- {label} 分岔鄰近 (iteration {center} 前後各 {radius} 步) ---")
     print(f"  {'iter':>4s}  {'MATLAB':>25s}  {'Python':>25s}  {'diff':>12s}")
     for i in range(lo, hi):

@@ -651,3 +651,118 @@ checklist 已列（§四陷阱 #5.1-5.10 + §五專屬 5.1-5.7 + §七 Open Q 12
 **階段 B 第一步**：回答 §七 Open Questions → 寫 `NNI_with_history.m` + `generate_nni_reference.m`（spsolve 單 case）→ 實作 `python/tensor_utils.py::nni`（spsolve + gmres 雙分支、step_length helper）→ 寫 `python/test_tensor_utils.py::test_nni_basic` 等 sanity → 寫 `python/test_nni_parity.py`（spsolve 對 MATLAB）→ 寫 `python/test_nni_gmres_sanity.py`（gmres vs spsolve 近似比對）→ MATLAB 端跑 reference → Python parity + sanity → 若全過收尾、否則走 HONI 的三 Tier pattern。
 
 **預計工作量**：~4-6 小時（比 HONI ~8 小時短、因為單層 + 依賴全備）。
+
+---
+
+## 九、NNI_ha extension（halving-enabled variant）
+
+2020 paper `Test_Heig2.m` 的 benchmark 實際呼叫的是 `NNI_ha.m`（halving 啟用版）、不是 canonical `NNI.m`。為重現 paper 實驗、需把 halving path 擴展進現有 `nni()`。本節是 Phase 0 diff 分析的書面化延伸、**port 前需先由使用者拍板 §9.3 的三個開放問題**。
+
+### 9.1 Phase 0 diff 結論摘要
+
+- 兩檔皆 270 行、ASCII 純文字、CRLF line endings
+- Unix `diff` 只有 3 處差異：
+  1. Line 1 — 函式名 `NNI` → `NNI_ha`（改名、無實質）
+  2. Line 166 — `tol_theta = 1e-8` → `tol_theta = 1e-12`（halving break 門檻參數）
+  3. Lines 174–186 — 13 行 halving `while` 迴圈從 `%` 註解變為 active code
+- 差異全集中在 `step_length` subfunction（line 148–187）、主演算法外層 Newton loop（line 1–~100）100% 一致
+- 主 loop call site（NNI_ha.m line 60）：`[x, lambda_U, lambda_L, hit] = step_length(AA,m,x,y,w,lambda_U);` — 直接用 step_length 返回值、**沒有 fallback 邏輯**
+- **結論**：100% halving-only diff、零 substantive 差異
+- Source 路徑：`source_code/Tensor Eigenvalue Problem/2020_HNI_Revised/NNI_ha.m`
+
+### 9.2 API 擴展決策（推薦選項 A）
+
+| 選項 | Python API | 推薦度 |
+|---|---|---|
+| **A** | `nni(..., halving=False, tol_theta=1e-12)` 加 2 個 kwarg | ⭐⭐⭐ |
+| B | 獨立 `nni_ha(...)` 函式（~80% 複製 NNI） | ⭐ |
+| C | internal `_nni_core(halving, tol_theta)` + thin wrappers `nni()`, `nni_ha()` | ⭐⭐ |
+
+**推薦 A 的理由**：
+- Diff 純 halving、單一函式加兩個 kwarg 足以乾淨表達、不需 B 的複製或 C 的 indirection
+- Session 4 的 `hit_per_outer_history` 欄位已存在（canonical 恆為 0）、`halving=True` 時轉為 active 計數、不需改欄位 shape/dtype
+- B 兩份函式維護成本翻倍；C 在目前需求下 over-engineering
+
+**新 kwargs 規格**：
+- `halving: bool = False` — `False` 對應 NNI.m（canonical）、`True` 對應 NNI_ha.m
+- `tol_theta: float = 1e-12` — halving break 門檻；**`halving=False` 時無作用**（仍設 default 以 match NNI_ha 實際值、避免使用者開啟 `halving=True` 還得自己查文獻）
+- docstring 必須明示「`tol_theta` 只在 `halving=True` 時生效」
+
+### 9.3 三個開放問題（Phase 2 實作前必須拍板）
+
+**Q1 — `tol_theta` default 值**
+
+- NNI_ha.m line 166 用 `1e-12`；NNI.m 的 `1e-8` 是 dead code（while 在註解、從未 evaluated）
+- 一般原則：default 取「實際會跑 halving 的檔案用的值」、NNI_ha.m 是唯一有效源
+- **建議**：`tol_theta: float = 1e-12`
+- **等使用者確認**：接受 `1e-12` 為 default？還是偏好不設 default、強制 `halving=True` 時 explicit 傳參？（更明確、但打字成本高、IDE 補全不友善）
+
+**Q2 — `hit` 計數的型別（int scalar vs array）**
+
+- Canonical NNI 下 `hit ≡ 0`、目前 `hit_per_outer_history` 存 int array（shape `(outer_nit+1,)`、全零）
+- `halving=True` 下每個 outer iter 有自己的 halving 次數（MATLAB 也是 per-iter scalar、主 loop `hit_per_outer_history[nit] = hit` 逐 iter 記、不累加）
+- 結構上仍是 int array、無需改 dtype / shape
+- **建議**：保持 `hit_per_outer_history` int array 不變、語意從「always zero」轉為「per-outer-iter halving count」
+- **等使用者確認**：採此建議、還是想改欄位名（例如 `halving_count_history`）反映活化後的語意？（改名代價：Session 4 的 `test_nni_parity.py` 和 docstring 要同步改、但改名後語意更自述）
+
+**Q3 — `hit_per_outer_history` 的「dead → live」語意轉換處理**
+
+- 現行 docstring 說此欄位「canonical 恆為 0」
+- `halving=True` 啟用後變成實際 halving 次數、dead → live
+- 選項：
+  - **(a)** 單一 field 加 docstring 條件說明
+  - **(b)** 拆成兩個 field：`hit_per_outer_history`（canonical 恆 0，保留向後相容） + `hit_ha_per_outer_history`（halving 專用）
+- **建議**：(a) 單一 field、docstring 加條件說明「`halving=False` 時此欄位恆為 0；`halving=True` 時記錄每 outer iter 進入 halving while 的次數」
+- **等使用者確認**：OK 採 (a)？還是偏好 (b) 讓 dead/live 完全隔離（但會多一個永遠為 None/空 的 field 視 branch 而定）？
+
+### 9.4 Parity 風險預警
+
+| 風險 | 說明 | 緩解 |
+|---|---|---|
+| **Test case 必須觸發 halving** | Multi halving 在 m≥3 random AA 下「trap-and-diverge」（Day 2 memory）；NNI_ha halving 觸發條件**不同**（conditional on `λ_U_new - λ_U > 1e-13`、非 res 增加）、Q7-style diagonally-dominant M-tensor 可能根本不觸發 halving、parity 就沒 exercise halving code | 需 construct **full-step overshoot** 的 test case；先嘗試 `Test_Heig2.m` 的 paper benchmark 參數作起點、若 Q7 風格也能觸發就併用 |
+| **`hit` 語意從 dead → live** | Session 4 parity test 未驗 `hit > 0`（canonical 永遠 0）；`halving=True` 下若 test case 沒觸發、`hit` 仍為 0、parity 會 PASS 但根本沒跑到 halving code、無法證明 port 正確 | Phase 3 parity test 新增 `assert sum(hit_per_outer_history) > 0`、否則報 "halving path not exercised"、視為 test failure |
+| **`tol_theta` kwarg 暴露** | NNI.m 的 `tol_theta=1e-8` 是 dead code；Python default 設 `1e-12`（match NNI_ha）、在 `halving=False` 下使用者若看到「怎麼 default 不是 1e-8」可能困惑 | docstring 明示「`halving=False` 時 `tol_theta` 無作用；default 設 1e-12 以 match NNI_ha.m 實際值、非 NNI.m 的 dead-code 值」 |
+| **Halving break 後的非單調行為**（Phase 1 新發現） | 當 halving while 因 `theta < tol_theta` break 時、`x_new` 是最後一次 halve 的結果、`λ_U_new` 可能仍 > 舊 `λ_U`（monotone 被破壞）。NNI_ha.m line 60 的 call site 直接用 step_length 返回值、**沒有 fallback**、主 loop 拿到這個「未成功 halve 的 x」繼續下一輪 outer iteration、可能進入震盪 | MATLAB 原碼行為、port 照抄即可；parity test 跑到 break case 時需 bit-identical 比對；docstring 標 `"halving break → non-monotone λ_U 可能出現、是 MATLAB 原碼行為、非 port bug"`；若 break 頻繁發生、考慮新增 INFO tier（類似 HONI 的 tier 3）記 break 次數 |
+
+### 9.5 Phase 2 / Phase 3 相依
+
+- **Phase 2（實作）前提**：§9.3 三個開放問題需有使用者明確答案
+- **Phase 3（parity test）相依**：Phase 2 完成 + `matlab_ref/nni/` 新增 `NNI_ha_with_history.m` + `generate_nni_ha_reference.m`（復用 Session 4 的 3-Tier 框架）
+- **Test case 設計優先級**：
+  1. 先試 Q7-style（看會不會觸發 halving、記錄 `sum(hit) = ?`）
+  2. 若 Q7 不觸發、改挑 `Test_Heig2.m` 的 paper benchmark 參數（這也是最終 port 目標的 driver）
+  3. 若 paper benchmark 觸發、同時跑 Q7（canonical 對比 baseline）、兩 case 都入 parity test
+
+**預估**：Phase 1（本節）0.5h、Phase 2（port）0.5–1h、Phase 3（parity）1–2h；合計 **2–3.5h**（跟 Session 6 選項 B 原估 2–4h 一致、靠低端）。
+
+### 9.6 Parity empirical finding（port 後補記）
+
+Phase 3 跑 Q7 `halving=True` parity 後實測觀察：
+
+**Timing 結果**：
+- MATLAB `NNI_ha_with_history` Q7 case (tol=1e-10)：`nit=59, chit=109, final λ=10.69910094153084`
+- Python `nni(..., halving=True, tol_theta=1e-12)` 同 AA (loaded from .mat)：`nit=32 (1-based), chit=19, final λ=10.69910094153080`
+- **Tier 2 final outputs**：`|Δλ| = 3.02e-14`、`||x_ml − x_py|| / ||x_ml|| = 4.44e-16`、完全 PASS
+- **bit-identical prefix**：iter 0-29 所有 history 欄位（`x`、`w`、`y`、`lambda_U`、`lambda_L`、`res`、`chit`、`hit`）machine-epsilon 內一致
+- **Noise floor divergence**：iter 30 起 `y_history REL = 1.19e-10` 超過 `TIER1_Y_RTOL`；`lambda_L_history diff = 3.73e-4`（因為 `min(temp)` 的 attained-index 兩端抽籤）；`chit/hit` 從 iter 30 起分岔 1 個單位
+- **Quantitative gap**：halving 次數 MATLAB 5.7× Python（109 vs 19）、iter count 1.8× （59 vs 32）— halving 把 stopping-iter lottery 擴大為路徑 lottery
+
+**Tier 1 設計教訓**：
+
+在 `halving=False` canonical case（見 test_nni_parity.py），noise floor lottery 主要影響**停止時機**（Python 早 5 iter 停、Tier 3 自然接住）；Tier 1 用單一 `K_common` overlap 就夠、因為兩端前 22 iter 都 bit-identical。
+
+在 `halving=True` NNI_ha case，lottery 擴成**路徑**分岔：一旦某 iter 的 `min(temp)` 在兩端落在不同 index、`lambda_L_new` 分岔、halving 條件分岔、`chit/hit` 分岔、後續所有 iter 的 Newton direction 都走不同路。**單一 K_common 不夠細**——需要 `k_star` 切點、Tier 1 STRICT 只驗 `[0:k_star)` 的 bit-identical prefix、`[k_star:K_common)` 降級到 Tier 3 INFO。
+
+**`k_star` 偵測邏輯**（port 到 `test_nni_ha_parity.py`）：
+- 多 canary scan、取**最早 divergence iter**：
+  - ABS canaries: `lambda_L_history` / `lambda_U_history` / `res_history`（tol = `TIER1_ABS = 1e-10`）
+  - INT canaries: `chit_history` / `hit_per_outer_history`（任何非 0 diff 即 divergence）
+  - REL canary: `y_history`（per-iter max REL diff、tol = `TIER1_Y_RTOL = 1e-10`、slot 0 NaN 跳過）
+- `k_star = min(first_bad_iter over all canaries)`；找不到任何 canary 超 tol → `k_star = K_common`
+- Tier 1 STRICT 用 `[0:k_star)`；`[k_star:K_common)` 的各欄位 `max abs diff` 在 Tier 3 INFO 中印出
+
+**為什麼需要多 canary（不能只用 `y_history`）**：實測 Q7 case iter 30 是分岔起點（`lambda_L_history` / `chit_history` / `hit_per_outer_history` / `res_history` / `x_history` 全在 iter 30 diverge）、**但 `y_history` 在 iter 30 還是 bit-identical**、要到 iter 31 才觸發。原因：`y` 在 outer iter k 的**開頭** 被計算（用 iter k-1 末的 x），iter 30 的 y 是用 iter 29 的 clean x 算出來的；lambda_L / chit / hit 分岔發生在 iter 30 的**末尾**（full step → temp → min(temp) 的 attained-index 抽籤）、影響的是 history slot 30 的 lambda_L 但不影響 slot 30 的 y。如果只用 y_history 當 canary、`k_star` 會晚一步、iter 30 的 fail 沒被保護。多 canary 取最早 iter 就同時接住這種「y 落後一步」的情況。
+
+**可重用性**：其他在 noise-floor regime 可能出現路徑分岔的 port（例如未來的 shift-invert 變體、或 iterative eigenvalue methods），可以復用這個 `k_star` + Tier 1 STRICT 截斷 + Tier 3 post-truncation INFO 的 pattern。核心原則：**bit-identical prefix → 降級 overlap → 演算法層 final 等價性**，三層獨立驗證。
+
+**結論**：`halving=True` port 本身正確；Q7 case 的 noise-floor 路徑 lottery 是 Rayleigh quotient 類演算法的本質行為（英文筆記 §4.7 已記載、halving 放大現象是新觀察）。parity test 以 `k_star` 切點保護 Tier 1 的有效性、不放寬 tolerance、不假裝分岔不存在。
