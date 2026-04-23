@@ -920,10 +920,173 @@ def render_eigenvalue_compare() -> None:
             st.code(read_snippet("nni"), language="matlab")
 
 
+def render_multilinear_compare() -> None:
+    st.header("Multilinear solver comparison — 2-3 Multi runs (tol sweep)")
+    st.caption(
+        "並排執行 2 或 3 個 Multi runs，所有 runs 共用同一 `A` + `b`，僅 `tol` 不同。"
+        "適合觀察 Multi 的 Newton 收斂在不同停止門檻下的 outer iter / halving 行為。"
+    )
+    st.caption(
+        "⚠️ Multi 在 `m≥3` + random AA 常 trap-and-diverge 在 halving path（設計為 near-optimal "
+        "微調、不是大幅 overshoot 修正）— 這是演算法本質、非 port bug。"
+        "詳見 `memory/feedback_multi_halving_fragility.md`。"
+    )
+    st.caption(
+        "📎 Multi 的外層迭代上限硬編碼 `nit < 100`（MATLAB `Multi.m` 行為）、"
+        "無 `maxit` 或 `solver` 參數、所以 per-run 只能 vary `tol`。"
+    )
+
+    # ------------------------- Section 1: Shared config -------------------------
+    st.subheader("Shared configuration")
+    col_ds, col_dim, col_nruns = st.columns([2, 1, 1])
+
+    with col_ds:
+        is_upload, upload_data = _render_data_source_block("cmp_multi")
+
+    with col_dim:
+        if is_upload and upload_data is not None:
+            m = st.number_input(
+                "m (from upload)", value=upload_data["m"], disabled=True,
+                key="cmp_multi_m_up",
+            )
+            n = st.number_input(
+                "n (from upload)", value=upload_data["n"], disabled=True,
+                key="cmp_multi_n_up",
+            )
+        elif is_upload:
+            st.caption("⏳ Waiting for upload…")
+            m, n = 3, 20
+        else:
+            m = st.number_input(
+                "m (tensor order)", min_value=2, max_value=5, value=3, step=1,
+                key="cmp_multi_m_q7",
+            )
+            n = st.number_input(
+                "n (per-mode size)", min_value=5, max_value=50, value=20, step=1,
+                key="cmp_multi_n_q7",
+            )
+
+    with col_nruns:
+        n_runs = st.radio(
+            "Number of runs", options=[2, 3], index=0,
+            key="cmp_multi_n_runs", horizontal=True,
+        )
+
+    st.divider()
+
+    # ------------------------- Section 2: Per-run config -----------------------
+    st.subheader("Per-run configuration (tol only)")
+    default_tols = [1e-8, 1e-10, 1e-12]
+    run_cfg_cols = st.columns(n_runs)
+    runs_cfg = []
+    for i, col in enumerate(run_cfg_cols):
+        with col:
+            st.markdown(f"**Run {i + 1}**")
+            tol = st.number_input(
+                "tol", value=default_tols[i], format="%.0e",
+                key=f"cmp_multi_tol_{i}",
+            )
+            runs_cfg.append({"tol": float(tol)})
+
+    # ------------------------- Section 3: Run button ---------------------------
+    run_disabled = is_upload and upload_data is None
+    run_pressed = st.button(
+        "Run all configurations", type="primary",
+        disabled=run_disabled, use_container_width=True,
+        key="cmp_multi_run",
+    )
+
+    if run_pressed:
+        if is_upload:
+            AA = upload_data["AA"]
+            b = (
+                upload_data["x0"]
+                if upload_data["x0"] is not None
+                else _fallback_initial_vector(int(n))
+            )
+            source_tag = f"Upload — {upload_data['source_info']}"
+        else:
+            AA, b = build_q7_tensor(n=int(n), m=int(m), rng_seed=42)
+            source_tag = f"Q7 default (n={int(n)}, m={int(m)}, rng=42)"
+
+        runs_out = []
+        try:
+            for i, cfg in enumerate(runs_cfg):
+                label = f"Run {i + 1}: Multi (tol={cfg['tol']:.0e})"
+                u, nit, hal, history = multi(
+                    AA, b, int(m), cfg["tol"], record_history=True,
+                )
+                total_hal = int(hal[: nit + 1].sum())
+                runs_out.append({
+                    "label": label,
+                    "tol": cfg["tol"],
+                    "u": u,
+                    "nit": int(nit),
+                    "total_hal": total_hal,
+                    "res": np.asarray(history["res_history"]),
+                })
+            st.session_state["cmp_multi_results"] = {
+                "source_tag": source_tag,
+                "runs": runs_out,
+            }
+        except Exception as e:
+            st.session_state["cmp_multi_results"] = {
+                "error": f"{type(e).__name__}: {e}",
+            }
+
+    # ------------------------- Section 4: Results ------------------------------
+    results = st.session_state.get("cmp_multi_results")
+    if results is None:
+        st.info(
+            "Configure shared AA + per-run tol above, then press "
+            "**Run all configurations**."
+        )
+    elif "error" in results:
+        st.error(f"Comparison failed — {results['error']}")
+    else:
+        st.divider()
+        st.caption(f"Data source: {results['source_tag']}")
+        st.subheader("Results — per run")
+
+        runs = results["runs"]
+        result_cols = st.columns(len(runs))
+        for col, run in zip(result_cols, runs):
+            with col:
+                st.markdown(f"**{run['label']}**")
+                mc1, mc2 = st.columns(2)
+                mc1.metric("outer nit", run["nit"])
+                mc2.metric("total halving", run["total_hal"])
+                st.metric("final residual", f"{float(run['res'][-1]):.3e}")
+                _plot_log_history(
+                    {"residual": run["res"]},
+                    title=f"Multi convergence (tol={run['tol']:.0e})",
+                    y_label="‖A·u^(m-1) - b^(m-1)‖",
+                )
+
+        st.divider()
+        st.subheader("Summary — residual convergence overlay")
+        overlay = {run["label"]: run["res"] for run in runs}
+        _plot_log_history(
+            overlay,
+            title="All runs on one log-y plot",
+            y_label="residual",
+        )
+        st.caption(
+            "**讀圖要點**：較嚴格的 `tol` 會要求外層 Newton 跑更多 iter — "
+            "曲線延伸更長。若 tol 低於 Multi 的 inner halving 可達精度、"
+            "最終殘差會在同一 floor 震盪（halving path trap 或 line search 找不到下降方向），"
+            "iter count 可能直接頂到硬編碼上限 100。"
+        )
+
+    with st.expander("📄 對應的 MATLAB 原始碼 — Multi.m"):
+        st.code(read_snippet("multi"), language="matlab")
+
+
 ALGORITHMS = {
     "Multi": render_multi,
     "HONI": render_honi,
     "NNI": render_nni,
     "HONI vs NNI comparison": render_hni_vs_nni,
     "Eigenvalue solver comparison (HONI / NNI, multi-run)": render_eigenvalue_compare,
+    "Multilinear solver comparison (Multi, multi-run)": render_multilinear_compare,
 }
