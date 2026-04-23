@@ -17,6 +17,7 @@ import streamlit as st
 
 from streamlit_app._internal.snippets import read_snippet
 from streamlit_app.problems.tensor_eigenvalue.defaults import build_q7_tensor
+from streamlit_app.problems.tensor_eigenvalue.uploads import load_tensor_file
 from tensor_utils import honi, multi, nni
 
 
@@ -94,6 +95,62 @@ def _gmres_info_summary(info_history) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Data-source helpers (Q7 default / Upload)
+# ---------------------------------------------------------------------------
+
+
+def _fallback_initial_vector(n: int) -> np.ndarray:
+    """Default positive initial vector used when an upload omits x0."""
+    rng = np.random.default_rng(42)
+    return np.abs(rng.random(n)) + 0.1
+
+
+def _render_data_source_block(renderer_key: str):
+    """Render Data source radio + file_uploader OUTSIDE any ``st.form``.
+
+    Returns ``(is_upload, upload_data)``:
+      - ``is_upload``  : True if user selected the Upload option
+      - ``upload_data``: parsed tensor dict on success, else None. Errors are
+        surfaced as ``st.error`` before return; callers should disable the
+        Run button when ``is_upload`` is True but ``upload_data`` is None.
+    """
+    source = st.radio(
+        "Data source",
+        options=["Q7 default (n=20, m=3)", "Upload (.mat / .npz)"],
+        key=f"data_source_{renderer_key}",
+    )
+    is_upload = source.startswith("Upload")
+    if not is_upload:
+        return False, None
+
+    uploaded = st.file_uploader(
+        "Tensor file",
+        type=["mat", "npz"],
+        key=f"upload_{renderer_key}",
+        help=(
+            "Reserved keys tried first: **AA** (2-D mode-1 unfolding) or "
+            "**A_tensor** (m-D full tensor); **x0** (optional, 1-D length n). "
+            "Auto-detects any ndim≥2 array if reserved names are absent."
+        ),
+    )
+    if uploaded is None:
+        st.info(
+            "請上傳 .mat 或 .npz 檔。"
+            "Reserved 變數名：`AA` / `A_tensor` / `x0`；找不到會自動偵測。"
+        )
+        return True, None
+
+    try:
+        data = load_tensor_file(uploaded)
+    except ValueError as e:
+        st.error(f"Upload failed — {e}")
+        return True, None
+
+    st.success(f"✓ Loaded — {data['source_info']}")
+    return True, data
+
+
+# ---------------------------------------------------------------------------
 # Renderers
 # ---------------------------------------------------------------------------
 
@@ -112,18 +169,45 @@ def render_multi() -> None:
 
     with col_in:
         st.subheader("Inputs")
+        is_upload, upload_data = _render_data_source_block("multi")
+
         with st.form("multi_form"):
-            m = st.number_input(
-                "m (tensor order)", min_value=2, max_value=5, value=3, step=1
-            )
-            n = st.number_input(
-                "n (per-mode size)", min_value=5, max_value=50, value=20, step=1
-            )
+            if is_upload and upload_data is not None:
+                m = st.number_input(
+                    "m (from upload)", value=upload_data["m"], disabled=True
+                )
+                n = st.number_input(
+                    "n (from upload)", value=upload_data["n"], disabled=True
+                )
+            elif is_upload:
+                st.caption("⏳ Waiting for file upload to populate m and n…")
+                m, n = 3, 20
+            else:
+                m = st.number_input(
+                    "m (tensor order)", min_value=2, max_value=5, value=3, step=1
+                )
+                n = st.number_input(
+                    "n (per-mode size)", min_value=5, max_value=50, value=20, step=1
+                )
             tol = st.number_input("tol", value=1e-10, format="%.0e")
-            submitted = st.form_submit_button("Run multi", type="primary")
+            submitted = st.form_submit_button(
+                "Run multi",
+                type="primary",
+                disabled=(is_upload and upload_data is None),
+            )
 
         if submitted:
-            AA, b = build_q7_tensor(n=int(n), m=int(m), rng_seed=42)
+            if is_upload:
+                AA = upload_data["AA"]
+                b = (
+                    upload_data["x0"]
+                    if upload_data["x0"] is not None
+                    else _fallback_initial_vector(int(n))
+                )
+                source_tag = f"Upload — {upload_data['source_info']}"
+            else:
+                AA, b = build_q7_tensor(n=int(n), m=int(m), rng_seed=42)
+                source_tag = f"Q7 default (n={int(n)}, m={int(m)}, rng=42)"
             try:
                 u, nit, hal, history = multi(
                     AA, b, int(m), float(tol), record_history=True
@@ -131,6 +215,7 @@ def render_multi() -> None:
                 st.session_state["multi_result"] = {
                     "u": u, "nit": nit, "hal": hal, "history": history,
                     "n": int(n), "m": int(m), "tol": float(tol),
+                    "source_tag": source_tag,
                 }
             except Exception as e:
                 st.session_state["multi_result"] = {"error": f"{type(e).__name__}: {e}"}
@@ -154,6 +239,8 @@ def render_multi() -> None:
             mc1.metric("outer iterations (nit)", nit)
             mc2.metric("final residual", f"{final_res:.3e}")
             mc3.metric("total halving steps", total_hal)
+
+            st.caption(f"Data source: {result.get('source_tag', 'Q7 default')}")
 
             _plot_log_history(
                 {"residual": history["res_history"]},
@@ -183,13 +270,26 @@ def render_honi() -> None:
 
     with col_in:
         st.subheader("Inputs")
+        is_upload, upload_data = _render_data_source_block("honi")
+
         with st.form("honi_form"):
-            m = st.number_input(
-                "m (tensor order)", min_value=2, max_value=5, value=3, step=1
-            )
-            n = st.number_input(
-                "n (per-mode size)", min_value=5, max_value=50, value=20, step=1
-            )
+            if is_upload and upload_data is not None:
+                m = st.number_input(
+                    "m (from upload)", value=upload_data["m"], disabled=True
+                )
+                n = st.number_input(
+                    "n (from upload)", value=upload_data["n"], disabled=True
+                )
+            elif is_upload:
+                st.caption("⏳ Waiting for file upload to populate m and n…")
+                m, n = 3, 20
+            else:
+                m = st.number_input(
+                    "m (tensor order)", min_value=2, max_value=5, value=3, step=1
+                )
+                n = st.number_input(
+                    "n (per-mode size)", min_value=5, max_value=50, value=20, step=1
+                )
             tol = st.number_input("tol", value=1e-10, format="%.0e")
             maxit = st.number_input(
                 "maxit (outer)", min_value=10, max_value=1000, value=200, step=10
@@ -201,10 +301,24 @@ def render_honi() -> None:
                 help="exact = inner_tol 寫死 1e-10 + lambda_U 增量更新；"
                      "inexact = inner_tol 動態 + lambda_U 重算",
             )
-            submitted = st.form_submit_button("Run honi", type="primary")
+            submitted = st.form_submit_button(
+                "Run honi",
+                type="primary",
+                disabled=(is_upload and upload_data is None),
+            )
 
         if submitted:
-            AA, x0 = build_q7_tensor(n=int(n), m=int(m), rng_seed=42)
+            if is_upload:
+                AA = upload_data["AA"]
+                x0 = (
+                    upload_data["x0"]
+                    if upload_data["x0"] is not None
+                    else _fallback_initial_vector(int(n))
+                )
+                source_tag = f"Upload — {upload_data['source_info']}"
+            else:
+                AA, x0 = build_q7_tensor(n=int(n), m=int(m), rng_seed=42)
+                source_tag = f"Q7 default (n={int(n)}, m={int(m)}, rng=42)"
             try:
                 lam, x, outer_nit, innit, outer_res, lam_hist, history = honi(
                     AA, int(m), float(tol),
@@ -217,6 +331,7 @@ def render_honi() -> None:
                     "lam": lam, "x": x, "outer_nit": outer_nit, "innit": innit,
                     "outer_res": outer_res, "lam_hist": lam_hist, "history": history,
                     "linear_solver": linear_solver,
+                    "source_tag": source_tag,
                 }
             except Exception as e:
                 st.session_state["honi_result"] = {"error": f"{type(e).__name__}: {e}"}
@@ -243,6 +358,7 @@ def render_honi() -> None:
             mc4.metric("final residual", f"{float(outer_res[-1]):.3e}")
 
             st.caption(f"solver branch: `{result['linear_solver']}`")
+            st.caption(f"Data source: {result.get('source_tag', 'Q7 default')}")
 
             _plot_log_history(
                 {"outer residual": outer_res},
@@ -277,13 +393,26 @@ def render_nni() -> None:
 
     with col_in:
         st.subheader("Inputs")
+        is_upload, upload_data = _render_data_source_block("nni")
+
         with st.form("nni_form"):
-            m = st.number_input(
-                "m (tensor order)", min_value=2, max_value=5, value=3, step=1
-            )
-            n = st.number_input(
-                "n (per-mode size)", min_value=5, max_value=50, value=20, step=1
-            )
+            if is_upload and upload_data is not None:
+                m = st.number_input(
+                    "m (from upload)", value=upload_data["m"], disabled=True
+                )
+                n = st.number_input(
+                    "n (from upload)", value=upload_data["n"], disabled=True
+                )
+            elif is_upload:
+                st.caption("⏳ Waiting for file upload to populate m and n…")
+                m, n = 3, 20
+            else:
+                m = st.number_input(
+                    "m (tensor order)", min_value=2, max_value=5, value=3, step=1
+                )
+                n = st.number_input(
+                    "n (per-mode size)", min_value=5, max_value=50, value=20, step=1
+                )
             tol = st.number_input("tol", value=1e-10, format="%.0e")
             maxit = st.number_input(
                 "maxit", min_value=10, max_value=1000, value=200, step=10
@@ -295,10 +424,24 @@ def render_nni() -> None:
                 help="spsolve = MATLAB-parity 路徑（LU direct）；"
                      "gmres = Python-only 大 sparse 路徑（iterative、預設 maxit=1000 tol=1e-10 restart=20）",
             )
-            submitted = st.form_submit_button("Run nni", type="primary")
+            submitted = st.form_submit_button(
+                "Run nni",
+                type="primary",
+                disabled=(is_upload and upload_data is None),
+            )
 
         if submitted:
-            AA, x0 = build_q7_tensor(n=int(n), m=int(m), rng_seed=42)
+            if is_upload:
+                AA = upload_data["AA"]
+                x0 = (
+                    upload_data["x0"]
+                    if upload_data["x0"] is not None
+                    else _fallback_initial_vector(int(n))
+                )
+                source_tag = f"Upload — {upload_data['source_info']}"
+            else:
+                AA, x0 = build_q7_tensor(n=int(n), m=int(m), rng_seed=42)
+                source_tag = f"Q7 default (n={int(n)}, m={int(m)}, rng=42)"
             try:
                 lam_U, x, nit, lam_L, res_hist, lam_U_hist, history = nni(
                     AA, int(m), float(tol),
@@ -311,6 +454,7 @@ def render_nni() -> None:
                     "lam_U": lam_U, "lam_L": lam_L, "x": x, "nit": nit,
                     "res_hist": res_hist, "lam_U_hist": lam_U_hist,
                     "history": history, "linear_solver": linear_solver,
+                    "source_tag": source_tag,
                 }
             except Exception as e:
                 st.session_state["nni_result"] = {"error": f"{type(e).__name__}: {e}"}
@@ -345,6 +489,7 @@ def render_nni() -> None:
                     history.get("gmres_info_history")
                 )
             st.caption(solver_caption)
+            st.caption(f"Data source: {result.get('source_tag', 'Q7 default')}")
 
             _plot_log_history(
                 {"residual": res_hist},
@@ -379,13 +524,26 @@ def render_hni_vs_nni() -> None:
 
     with col_in:
         st.subheader("Shared Inputs")
+        is_upload, upload_data = _render_data_source_block("cmp")
+
         with st.form("cmp_form"):
-            m = st.number_input(
-                "m (tensor order)", min_value=2, max_value=5, value=3, step=1
-            )
-            n = st.number_input(
-                "n (per-mode size)", min_value=5, max_value=50, value=20, step=1
-            )
+            if is_upload and upload_data is not None:
+                m = st.number_input(
+                    "m (from upload)", value=upload_data["m"], disabled=True
+                )
+                n = st.number_input(
+                    "n (from upload)", value=upload_data["n"], disabled=True
+                )
+            elif is_upload:
+                st.caption("⏳ Waiting for file upload to populate m and n…")
+                m, n = 3, 20
+            else:
+                m = st.number_input(
+                    "m (tensor order)", min_value=2, max_value=5, value=3, step=1
+                )
+                n = st.number_input(
+                    "n (per-mode size)", min_value=5, max_value=50, value=20, step=1
+                )
             tol = st.number_input("tol", value=1e-10, format="%.0e")
             maxit = st.number_input(
                 "maxit", min_value=10, max_value=1000, value=200, step=10
@@ -399,10 +557,24 @@ def render_hni_vs_nni() -> None:
                 "NNI linear_solver",
                 options=["spsolve", "gmres"], index=0,
             )
-            submitted = st.form_submit_button("Run HONI + NNI", type="primary")
+            submitted = st.form_submit_button(
+                "Run HONI + NNI",
+                type="primary",
+                disabled=(is_upload and upload_data is None),
+            )
 
         if submitted:
-            AA, x0 = build_q7_tensor(n=int(n), m=int(m), rng_seed=42)
+            if is_upload:
+                AA = upload_data["AA"]
+                x0 = (
+                    upload_data["x0"]
+                    if upload_data["x0"] is not None
+                    else _fallback_initial_vector(int(n))
+                )
+                source_tag = f"Upload — {upload_data['source_info']}"
+            else:
+                AA, x0 = build_q7_tensor(n=int(n), m=int(m), rng_seed=42)
+                source_tag = f"Q7 default (n={int(n)}, m={int(m)}, rng=42)"
             try:
                 h_lam, h_x, h_nit, h_inn, h_res, h_lam_hist, _ = honi(
                     AA, int(m), float(tol),
@@ -427,6 +599,7 @@ def render_hni_vs_nni() -> None:
                         "gmres_info": n_hist.get("gmres_info_history"),
                         "solver": nni_solver,
                     },
+                    "source_tag": source_tag,
                 }
             except Exception as e:
                 st.session_state["cmp_result"] = {"error": f"{type(e).__name__}: {e}"}
@@ -444,6 +617,7 @@ def render_hni_vs_nni() -> None:
         else:
             h = result["honi"]
             nn = result["nni"]
+            st.caption(f"Data source: {result.get('source_tag', 'Q7 default')}")
             tab_h, tab_n, tab_cmp = st.tabs(["HONI", "NNI", "Comparison"])
 
             with tab_h:
