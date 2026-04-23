@@ -632,6 +632,166 @@ def render_nni() -> None:
         st.code(read_snippet("nni"), language="matlab")
 
 
+def render_hni_vs_nni() -> None:
+    st.header("HNI vs NNI — 同一 AA 跑兩個演算法、比較收斂行為")
+    st.caption(
+        "兩演算法都求最大 H-eigenvalue，但結構不同：HONI 用**雙層 shift-invert**"
+        "（外層更新 λ、內層 Multi Newton 解 `(λ·I − A)·y^(m−1) = x^(m−1)`）；"
+        "NNI 用**單層 Newton**（每 iter 解 `(−M_shifted)·y = x^(m−1)`、Rayleigh-quotient 更新 λ）。"
+    )
+    st.caption(
+        "📎 Port / fragility 背景：`docs/algorithms_status.md` §5 parity 總表 + "
+        "三種 fragility 模式（halving / shift-invert / Rayleigh-quotient）。"
+    )
+
+    col_in, col_out = st.columns([1, 2])
+
+    with col_in:
+        st.subheader("Shared Inputs")
+        with st.form("cmp_form"):
+            m = st.number_input(
+                "m (tensor order)", min_value=2, max_value=5, value=3, step=1
+            )
+            n = st.number_input(
+                "n (per-mode size)", min_value=5, max_value=50, value=20, step=1
+            )
+            tol = st.number_input("tol", value=1e-10, format="%.0e")
+            maxit = st.number_input(
+                "maxit", min_value=10, max_value=1000, value=200, step=10
+            )
+            st.divider()
+            honi_solver = st.radio(
+                "HONI linear_solver",
+                options=["exact", "inexact"], index=0,
+            )
+            nni_solver = st.radio(
+                "NNI linear_solver",
+                options=["spsolve", "gmres"], index=0,
+            )
+            submitted = st.form_submit_button("Run HONI + NNI", type="primary")
+
+        if submitted:
+            AA, x0 = _build_q7_tensor(n=int(n), m=int(m), rng_seed=42)
+            try:
+                h_lam, h_x, h_nit, h_inn, h_res, h_lam_hist, _ = honi(
+                    AA, int(m), float(tol),
+                    linear_solver=honi_solver, maxit=int(maxit),
+                    initial_vector=x0, record_history=True,
+                )
+                n_lam_U, n_x, n_nit, n_lam_L, n_res, n_lam_U_hist, n_hist = nni(
+                    AA, int(m), float(tol),
+                    linear_solver=nni_solver, maxit=int(maxit),
+                    initial_vector=x0, record_history=True,
+                )
+                st.session_state["cmp_result"] = {
+                    "honi": {
+                        "lam": h_lam, "x": h_x, "nit": h_nit, "inn": h_inn,
+                        "res": h_res, "lam_hist": h_lam_hist,
+                        "solver": honi_solver,
+                    },
+                    "nni": {
+                        "lam_U": n_lam_U, "lam_L": n_lam_L, "x": n_x, "nit": n_nit,
+                        "res": n_res, "lam_U_hist": n_lam_U_hist,
+                        "lam_L_hist": n_hist["lambda_L_history"],
+                        "gmres_info": n_hist.get("gmres_info_history"),
+                        "solver": nni_solver,
+                    },
+                }
+            except Exception as e:
+                st.session_state["cmp_result"] = {"error": f"{type(e).__name__}: {e}"}
+
+    with col_out:
+        st.subheader("Output")
+        result = st.session_state.get("cmp_result")
+        if result is None:
+            st.info(
+                "Adjust shared inputs on the left, then press **Run HONI + NNI** "
+                "to solve the same AA with both algorithms."
+            )
+        elif "error" in result:
+            st.error(f"comparison failed — {result['error']}")
+        else:
+            h = result["honi"]
+            nn = result["nni"]
+            tab_h, tab_n, tab_cmp = st.tabs(["HONI", "NNI", "Comparison"])
+
+            with tab_h:
+                mc1, mc2, mc3, mc4 = st.columns(4)
+                mc1.metric("outer nit", h["nit"])
+                mc2.metric("total inner nit", h["inn"])
+                mc3.metric("final λ", f"{h['lam']:.6f}")
+                mc4.metric("final residual", f"{float(h['res'][-1]):.3e}")
+                st.caption(f"solver: `{h['solver']}`")
+                _plot_log_history(
+                    {"outer residual": h["res"]},
+                    title="HONI outer convergence",
+                    y_label="(λ_U − λ_L) / λ_U",
+                )
+                _plot_bar_vector(h["x"], title="HONI final x", x_label="component")
+
+            with tab_n:
+                mc1, mc2, mc3, mc4, mc5 = st.columns(5)
+                mc1.metric("nit", nn["nit"])
+                mc2.metric("final λ_U", f"{nn['lam_U']:.6f}")
+                mc3.metric("final λ_L", f"{nn['lam_L']:.6f}")
+                mc4.metric("spread", f"{nn['lam_U'] - nn['lam_L']:.3e}")
+                mc5.metric("final residual", f"{float(nn['res'][-1]):.3e}")
+                cap = f"solver: `{nn['solver']}`"
+                if nn["solver"] == "gmres":
+                    cap += " — " + _gmres_info_summary(nn["gmres_info"])
+                st.caption(cap)
+                _plot_log_history(
+                    {"residual": nn["res"]},
+                    title="NNI convergence",
+                    y_label="(λ_U − λ_L) / λ_U",
+                )
+                _plot_log_history(
+                    {"λ_U": nn["lam_U_hist"], "λ_L": nn["lam_L_hist"]},
+                    title="NNI eigenvalue bracket",
+                    y_label="λ",
+                    log_y=False,
+                )
+                _plot_bar_vector(nn["x"], title="NNI final x", x_label="component")
+
+            with tab_cmp:
+                delta_lam = abs(h["lam"] - nn["lam_U"])
+                x_diff = float(np.linalg.norm(h["x"] - nn["x"]))
+                # Eigenvectors are unique up to sign; try the sign that minimizes diff.
+                x_diff = min(x_diff, float(np.linalg.norm(h["x"] + nn["x"])))
+
+                mc1, mc2, mc3 = st.columns(3)
+                mc1.metric("HONI final λ", f"{h['lam']:.8f}")
+                mc2.metric("NNI final λ_U", f"{nn['lam_U']:.8f}")
+                mc3.metric("|Δλ|", f"{delta_lam:.3e}")
+
+                mc4, mc5, mc6 = st.columns(3)
+                mc4.metric("HONI iterations", f"{h['nit']} outer / {h['inn']} inner")
+                mc5.metric("NNI iterations", nn["nit"])
+                mc6.metric("‖x_HONI − x_NNI‖₂ (sign-aligned)", f"{x_diff:.3e}")
+
+                _plot_log_history(
+                    {"HONI outer res": h["res"], "NNI res": nn["res"]},
+                    title="Residual convergence — HONI vs NNI (log y)",
+                    y_label="residual",
+                )
+
+                st.caption(
+                    "**讀圖要點**：HONI 外層 iter 數通常遠少於 NNI（雙層 shift-invert "
+                    "每步更激進），但每外層 iter 含 Multi 的 inner iter，總工作量需對比 "
+                    "`HONI total inner` vs `NNI nit`。兩曲線最終常落到同一 noise floor "
+                    "（見研究筆記 §4.6）。"
+                )
+
+    with st.expander("📄 對應的 MATLAB 原始碼 — HONI.m + NNI.m"):
+        left, right = st.columns(2)
+        with left:
+            st.markdown("**HONI.m**")
+            st.code(read_snippet("honi"), language="matlab")
+        with right:
+            st.markdown("**NNI.m**")
+            st.code(read_snippet("nni"), language="matlab")
+
+
 # ========================================================================
 # Dispatch — this dict is the v0 forward-compat contract.
 # Adding a new ported function = add one renderer + one line here.
@@ -650,6 +810,8 @@ RENDERERS = {
     "multi (tensor eigenvalue)": render_multi,
     "honi (tensor eigenvalue)": render_honi,
     "nni (tensor eigenvalue)": render_nni,
+    # Layer 4 — cross-algorithm comparison
+    "hni vs nni (comparison)": render_hni_vs_nni,
 }
 
 
