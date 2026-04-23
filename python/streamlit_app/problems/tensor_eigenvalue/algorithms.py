@@ -697,9 +697,233 @@ def render_hni_vs_nni() -> None:
             st.code(read_snippet("nni"), language="matlab")
 
 
+def render_eigenvalue_compare() -> None:
+    st.header("Eigenvalue solver comparison — 2-3 runs side-by-side")
+    st.caption(
+        "並排執行 2 或 3 個 HONI / NNI runs，每個 run 獨立選演算法、tol、maxit、solver。"
+        "所有 runs 共用同一個 AA + 初始向量，便於比較不同 tol 下的 noise floor 行為、"
+        "或 HONI 雙層 shift-invert vs NNI 單層 Newton 的收斂路徑差異。"
+    )
+    st.caption(
+        "📎 比舊的「HONI vs NNI comparison」tile 更 general："
+        "2-run 固定 HONI+NNI 版本聚焦單一敘事；這個 renderer 適合 `tol` 掃 / noise floor 研究 / "
+        "同一演算法不同 solver 對比（spsolve vs gmres 在近奇異系統的穩定度）。"
+    )
+
+    # ------------------------- Section 1: Shared config -------------------------
+    st.subheader("Shared configuration")
+    col_ds, col_dim, col_nruns = st.columns([2, 1, 1])
+
+    with col_ds:
+        is_upload, upload_data = _render_data_source_block("cmp_eig")
+
+    with col_dim:
+        if is_upload and upload_data is not None:
+            m = st.number_input(
+                "m (from upload)", value=upload_data["m"], disabled=True,
+                key="cmp_eig_m_up",
+            )
+            n = st.number_input(
+                "n (from upload)", value=upload_data["n"], disabled=True,
+                key="cmp_eig_n_up",
+            )
+        elif is_upload:
+            st.caption("⏳ Waiting for upload…")
+            m, n = 3, 20
+        else:
+            m = st.number_input(
+                "m (tensor order)", min_value=2, max_value=5, value=3, step=1,
+                key="cmp_eig_m_q7",
+            )
+            n = st.number_input(
+                "n (per-mode size)", min_value=5, max_value=50, value=20, step=1,
+                key="cmp_eig_n_q7",
+            )
+
+    with col_nruns:
+        n_runs = st.radio(
+            "Number of runs", options=[2, 3], index=0,
+            key="cmp_eig_n_runs", horizontal=True,
+        )
+
+    st.divider()
+
+    # ------------------------- Section 2: Per-run config -----------------------
+    st.subheader("Per-run configuration")
+    run_cfg_cols = st.columns(n_runs)
+    runs_cfg = []
+    for i, col in enumerate(run_cfg_cols):
+        with col:
+            st.markdown(f"**Run {i + 1}**")
+            # Default: Run 1 = HONI, Run 2 = NNI, Run 3 = NNI (to showcase contrast)
+            default_algo = "HONI" if i == 0 else "NNI"
+            default_idx = ["HONI", "NNI"].index(default_algo)
+            algo = st.radio(
+                "algorithm", options=["HONI", "NNI"],
+                index=default_idx, horizontal=True,
+                key=f"cmp_eig_algo_{i}",
+            )
+            tol = st.number_input(
+                "tol", value=1e-10, format="%.0e", key=f"cmp_eig_tol_{i}",
+            )
+            maxit = st.number_input(
+                "maxit", min_value=10, max_value=1000, value=200, step=10,
+                key=f"cmp_eig_maxit_{i}",
+            )
+            if algo == "HONI":
+                solver = st.radio(
+                    "solver", options=["exact", "inexact"], index=0,
+                    horizontal=True, key=f"cmp_eig_solver_{i}",
+                )
+            else:
+                solver = st.radio(
+                    "solver", options=["spsolve", "gmres"], index=0,
+                    horizontal=True, key=f"cmp_eig_solver_{i}",
+                )
+            runs_cfg.append({
+                "algorithm": algo, "tol": float(tol),
+                "maxit": int(maxit), "solver": solver,
+            })
+
+    # ------------------------- Section 3: Run button ---------------------------
+    run_disabled = is_upload and upload_data is None
+    run_pressed = st.button(
+        "Run all configurations", type="primary",
+        disabled=run_disabled, use_container_width=True,
+    )
+
+    if run_pressed:
+        # Resolve AA + initial vector (shared across runs)
+        if is_upload:
+            AA = upload_data["AA"]
+            x0 = (
+                upload_data["x0"]
+                if upload_data["x0"] is not None
+                else _fallback_initial_vector(int(n))
+            )
+            source_tag = f"Upload — {upload_data['source_info']}"
+        else:
+            AA, x0 = build_q7_tensor(n=int(n), m=int(m), rng_seed=42)
+            source_tag = f"Q7 default (n={int(n)}, m={int(m)}, rng=42)"
+
+        runs_out = []
+        try:
+            for i, cfg in enumerate(runs_cfg):
+                label = (
+                    f"Run {i + 1}: {cfg['algorithm']} {cfg['solver']} "
+                    f"(tol={cfg['tol']:.0e}, maxit={cfg['maxit']})"
+                )
+                if cfg["algorithm"] == "HONI":
+                    lam, x, outer_nit, innit, res, lam_hist, history = honi(
+                        AA, int(m), cfg["tol"],
+                        linear_solver=cfg["solver"], maxit=cfg["maxit"],
+                        initial_vector=x0, record_history=True,
+                    )
+                    runs_out.append({
+                        "label": label, "algorithm": "HONI",
+                        "solver": cfg["solver"], "tol": cfg["tol"],
+                        "maxit": cfg["maxit"],
+                        "lam": float(lam), "x": x,
+                        "outer_nit": int(outer_nit), "inner_nit": int(innit),
+                        "res": np.asarray(res),
+                        "lam_hist": np.asarray(lam_hist),
+                    })
+                else:  # NNI
+                    (lam_U, x, nit, lam_L, res, lam_U_hist, hist_nni) = nni(
+                        AA, int(m), cfg["tol"],
+                        linear_solver=cfg["solver"], maxit=cfg["maxit"],
+                        initial_vector=x0, record_history=True,
+                    )
+                    runs_out.append({
+                        "label": label, "algorithm": "NNI",
+                        "solver": cfg["solver"], "tol": cfg["tol"],
+                        "maxit": cfg["maxit"],
+                        "lam_U": float(lam_U), "lam_L": float(lam_L), "x": x,
+                        "nit": int(nit),
+                        "res": np.asarray(res),
+                        "lam_U_hist": np.asarray(lam_U_hist),
+                        "gmres_info": hist_nni.get("gmres_info_history"),
+                    })
+            st.session_state["cmp_eig_results"] = {
+                "source_tag": source_tag,
+                "runs": runs_out,
+            }
+        except Exception as e:
+            st.session_state["cmp_eig_results"] = {
+                "error": f"{type(e).__name__}: {e}",
+            }
+
+    # ------------------------- Section 4: Results ------------------------------
+    results = st.session_state.get("cmp_eig_results")
+    if results is None:
+        st.info(
+            "Configure shared AA + per-run solvers above, then press "
+            "**Run all configurations**."
+        )
+    elif "error" in results:
+        st.error(f"Comparison failed — {results['error']}")
+    else:
+        st.divider()
+        st.caption(f"Data source: {results['source_tag']}")
+        st.subheader("Results — per run")
+
+        runs = results["runs"]
+        result_cols = st.columns(len(runs))
+        for col, run in zip(result_cols, runs):
+            with col:
+                st.markdown(f"**{run['label']}**")
+                if run["algorithm"] == "HONI":
+                    mc1, mc2 = st.columns(2)
+                    mc1.metric("outer nit", run["outer_nit"])
+                    mc2.metric("inner nit", run["inner_nit"])
+                    mc3, mc4 = st.columns(2)
+                    mc3.metric("final λ", f"{run['lam']:.6f}")
+                    mc4.metric("final res", f"{float(run['res'][-1]):.3e}")
+                else:
+                    mc1, mc2 = st.columns(2)
+                    mc1.metric("nit", run["nit"])
+                    mc2.metric("spread", f"{run['lam_U'] - run['lam_L']:.3e}")
+                    mc3, mc4 = st.columns(2)
+                    mc3.metric("final λ_U", f"{run['lam_U']:.6f}")
+                    mc4.metric("final res", f"{float(run['res'][-1]):.3e}")
+                    if run["solver"] == "gmres":
+                        st.caption(_gmres_info_summary(run["gmres_info"]))
+
+                _plot_log_history(
+                    {"residual": run["res"]},
+                    title=f"{run['algorithm']} {run['solver']} convergence",
+                    y_label="residual",
+                )
+
+        st.divider()
+        st.subheader("Summary — residual convergence overlay")
+        overlay = {run["label"]: run["res"] for run in runs}
+        _plot_log_history(
+            overlay,
+            title="All runs on one log-y plot",
+            y_label="residual",
+        )
+        st.caption(
+            "**讀圖要點**：x 軸是 iteration index — HONI 的 outer iter 通常少、"
+            "NNI 的 Newton iter 通常多；每步工作量不同（HONI 每外層含 Multi 內層、"
+            "NNI 每步解一個 linear system）。同 AA 最終殘差落到同一 noise floor "
+            "（量級 `machine_eps · n^(m-1) / min(x_i)^(m-1)`、見研究筆記 §4.6）。"
+        )
+
+    with st.expander("📄 對應的 MATLAB 原始碼 — HONI.m + NNI.m"):
+        left, right = st.columns(2)
+        with left:
+            st.markdown("**HONI.m**")
+            st.code(read_snippet("honi"), language="matlab")
+        with right:
+            st.markdown("**NNI.m**")
+            st.code(read_snippet("nni"), language="matlab")
+
+
 ALGORITHMS = {
     "Multi": render_multi,
     "HONI": render_honi,
     "NNI": render_nni,
     "HONI vs NNI comparison": render_hni_vs_nni,
+    "Eigenvalue solver comparison (HONI / NNI, multi-run)": render_eigenvalue_compare,
 }
