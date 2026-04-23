@@ -1,7 +1,7 @@
 # PROGRESS.md — Session checkpoint
 
-**最後更新**：2026-04-22（Day 4 收工）
-**狀態**：Layer 3+（Multi + HONI + **NNI**）完整完成、**三個核心演算法全綠**、下一步 Layer 4 demo 整合
+**最後更新**：2026-04-23（Day 5 收工）
+**狀態**：**Layer 4 demo 整合完成** + **架構重構為 problem-driven 兩層選單** — Multi/HONI/NNI 三個 renderer + HONI vs NNI 對比 tile 全部上線、Streamlit demo `_internal/` + `problems/tensor_eigenvalue/` 分層。三個核心演算法（Multi + HONI + NNI）和英文版研究筆記一併完成。
 
 ---
 
@@ -263,69 +263,130 @@ Port 前的 hazard analysis：`docs/superpowers/notes/nni_hazard_analysis.md`（
 
 ---
 
-## Git state（Day 4 收工）
+## Day 5 (2026-04-23) 完成摘要 — Layer 4 demo 整合 + 架構重構
 
-Day 4 新增（topmost、4 筆預計）：
+### 一、Layer 4 demo 整合（CP1–CP5）
+
+三個 Layer 3 演算法 + 對比 tile 全部進 Streamlit demo，demo v0 從 6 函式擴到 10 個 renderer：
+
+| Renderer | 輸入 | 輸出 metrics | Plots |
+|---|---|---|---|
+| `render_multi` | m, n, tol（Q7 AA）| nit / final res / total halving | residual log + final u bar |
+| `render_honi` | m, n, tol, maxit, linear_solver ∈ {exact, inexact} | outer nit / inner nit / λ / res | residual log + λ_U linear + final x bar |
+| `render_nni` | m, n, tol, maxit, linear_solver ∈ {spsolve, gmres} | nit / λ_U / λ_L / spread / res | residual log + bracket linear 雙線 + final x bar + gmres warnings caption |
+| `render_hni_vs_nni` | 共用 inputs + 兩個 solver radio | 3-tab（HONI / NNI / Comparison）；cross-validate \|Δλ\| + sign-aligned ‖x_H − x_N‖ | 並排 residual log 雙曲線 |
+
+Q7 test case 驗證：HONI exact 與 NNI spsolve 最終 **λ = 10.75623426**（bit-identical 到 machine epsilon、\|Δλ\| = 1.8e-15、‖x\_H − x\_N‖ = 2.7e-16 sign-aligned）— 兩獨立演算法 cross-validate 的事實從 parity test 裡提到 demo 首頁級敘事。
+
+### 二、Streamlit 架構重構（CP6）— problem-driven 兩層選單
+
+原本 10 entries 扁平 `RENDERERS` dict → 重組為 `PROBLEM_ALGORITHMS` 兩層 dict：
 
 ```
-<pending4> Rename hni_status.md → algorithms_status.md with NNI as primary algorithm
-<pending3> Update CLAUDE.md context loader for NNI completion
-<pending2> Update PROGRESS.md after NNI port (Layer 3+ complete, all algorithms ported)
-55921bc   Port NNI (canonical, 2020_HNI_Revised) to Python with linear solver menu (Session 4 階段 B)
-ab454ea   Add NNI.m hazard analysis before port (Session 4 階段 A)
+python/streamlit_app/
+├── demo_v0.py (79 行 router、比原 961 行削減 92%)
+├── _internal/
+│   ├── snippets.py                   # read_snippet (shared helper)
+│   └── utility_renderers.py          # 6 Layer 1/2 renderers，從 UI 隱藏
+└── problems/tensor_eigenvalue/
+    ├── defaults.py                   # build_q7_tensor
+    └── algorithms.py                 # 4 Layer 3 renderers + ALGORITHMS dict
 ```
 
-Day 3 結束時：
+Sidebar 變成 Step 1（問題類別）→ Step 2（演算法）。NLS / NCP 用 🚧 coming-soon placeholder 佔位、點到顯示 st.info 不 crash。Utilities 保留在 `_internal/` 可 import、但不暴露於 UI（demo 焦點收斂到「使用者研究演算法」）。
+
+Helper 歸屬經 grep 實地 verify、零重複：
+- `read_snippet` 共用 → `_internal/snippets.py`
+- `_get_rng` / `render_output_1d/2d` / `_make_sample_image` 只 Layer 1/2 用 → `_internal/`
+- `_plot_log_history` / `_plot_bar_vector` / `_gmres_info_summary` 只 Layer 3 用 → `algorithms.py`
+- `build_q7_tensor` 只 Layer 3 用 → `defaults.py`（underscore 去掉、現在是 sub-package public API）
+
+### 三、研究筆記英文版 + KaTeX 清理
+
+- 新增 `docs/papers/rayleigh_quotient_noise_floor_en.md`（English draft）— NNI 演算法架構（§2）+ noise floor 觀察/量化（§3-4）+ tolerance 選擇實務建議（§5）
+- 公式 bound: $\lambda_U - \lambda_L \lesssim n^{m-1} \lambda_{\max} \varepsilon_{\text{machine}} / (\min_i x_i)^{m-1}$
+- 初版有 KaTeX render + LaTeX source 交錯亂碼；清理後純 LaTeX source（512 → 494 行），可在 GitHub markdown / VS Code preview 正確顯示
+- LaTeX → PDF 轉換延後
+
+### 四、Streamlit demo 發布狀態驗證
+
+- 非互動：module import + 4 Layer 3 algorithms + Q7 data paths 全綠
+- Headless boot（CP5 Part A / Part B / CP6 共三次）：health 200 / home 200 / 0 errors in log
+- 互動測試（切選單、點 Run、切 tab）需使用者自己跑
+
+---
+
+## Git state（Day 5 收工）
+
+Day 5 新增（topmost、5 筆）：
 
 ```
-5974879 Add HONI implementation files missed from ccbe5c4 (Layer 3 step 2/2 cleanup)
-583e908 Add HNI system-level status document after Layer 3 complete
-f3ff657 Update CLAUDE.md context loader for Day 3
-466da26 Update PROGRESS.md after Day 2 session (Layer 3 complete)
-ccbe5c4 Port HONI (exact + inexact) to Python with tiered parity validation (Layer 3 step 2/2)
+068d894 Restructure demo to problem-driven two-level navigation (CP6)
+817ccf8 Add HNI vs NNI comparison tile to Streamlit demo (CP5 Part B)
+0e40f03 Integrate Layer 3 (Multi + HONI + NNI) into Streamlit demo (Session 5 Layer 4)
+b6a2f07 Clean up KaTeX duplication artifacts in Rayleigh quotient report
+a923768 Add Rayleigh quotient noise floor research note (English draft)
+```
+
+Day 4 結束時：
+
+```
+cb65311 Rename hni_status.md → algorithms_status.md with NNI as primary algorithm
+7526d6c Update CLAUDE.md context loader for NNI completion
+33f24c9 Update PROGRESS.md after NNI port (Layer 3+ complete, all algorithms ported)
+55921bc Port NNI (canonical, 2020_HNI_Revised) to Python with linear solver menu (Session 4 階段 B)
+ab454ea Add NNI.m hazard analysis before port (Session 4 階段 A)
 ```
 
 ---
 
-## 下一個動作：Session 5 — 二選一（待使用者決定）
+## 下一個動作：Session 6 — 三選一（待使用者決定）
 
-### 選項 A：Layer 4 整合（Streamlit demo 加 Multi + HONI + NNI 三個 renderer）
+### 選項 A：CP7 — 多跳對比模式 + 檔案上傳
 
 **為什麼**：
-- 三個核心演算法都 port 完、parity 全綠 → demo 補齊、整個工具箱的瀏覽器互動完整
-- 特別吸引點：**同一 AA 跑 HNI vs NNI 對比 tile**（使用者研究主軸的視覺化）、展示兩個演算法的收斂行為差異
-- demo pattern 已驗證（gaussian_blur + 5 個 Layer 1/2 工具）、§9 擴充 contract 有 Day 1 的實測
+- Day 5 CP6 的 UI 工作自然延伸。目前 demo 只有「Q7 預設 + 單跳跑」、CP7 會加：
+  - 多跳對比 mode（同一 renderer 多次執行、不同參數、結果並排）
+  - 自訂 AA 上傳（user 帶自己的 tensor 來 benchmark）
 
-**預計工作量**：2-3 小時（3 個 renderer、較 HNI-only 版本多 1 個）
+**預計工作量**：2–3 小時
 
-**產出**：`python/streamlit_app/demo_v0.py` 擴到 9 函式；HNI+NNI 端到端可 demo + 對比
+**產出**：`demo_v0.py` 的 sidebar 多一個 "Mode" 切換（single / compare），algorithm renderer 支援兩個 mode；上傳組件在 defaults.py 旁新增
 
 ---
 
-### 選項 B：NNI_ha port（benchmark 重現）
+### 選項 B：NNI_ha port — 2020 paper benchmark 重現
 
 **為什麼**：
-- `Test_Heig2.m` 的 benchmark 實際呼叫的是 `NNI_ha`（halving 啟用版）、不是 canonical `NNI.m`
-- 若要重現 2020 paper 的 HNI vs NNI benchmark 實驗、需要 port NNI_ha
-- 實作差異：加 halving `while` 迴圈（`θ /= 2`、`tol_theta=1e-12`）
+- `Test_Heig2.m` benchmark 實際呼叫 `NNI_ha`（halving 啟用版）、不是 canonical `NNI.m`
+- 重現 2020 paper HNI vs NNI 實驗需要此版本
 
-**預計工作量**：2-4 小時
-- `nni(halving=True)` 分支、或獨立 `nni_ha()` 函式（使用者決定）
-- 對 `NNI_ha.m` 的 parity test（halving path 覆蓋）
-- hazard analysis 已涵蓋、不用再寫
+**預計工作量**：2–4 小時。hazard analysis 已覆蓋、只是加 halving `while` 分支（`θ /= 2`、`tol_theta = 1e-12`）+ parity test。
 
-**產出**：`nni()` 加 halving 分支 + `test_nni_ha_parity.py` + `matlab_ref/nni/NNI_ha_with_history.m`
+**產出**：`nni()` 加 halving 分支或獨立 `nni_ha()` + `test_nni_ha_parity.py` + `NNI_ha_with_history.m`
+
+---
+
+### 選項 C：LaTeX 轉換 — 研究筆記 PDF 化
+
+**為什麼**：
+- `docs/papers/rayleigh_quotient_noise_floor_en.md` 是可閱讀的 markdown、但如果要作為研究文件分發、LaTeX + PDF 格式更正式
+- 公式、table、section numbering 搬進 `\documentclass{article}` + `amsmath` 即可
+
+**預計工作量**：30–60 分鐘（內容已完整、只是 format 轉換）
+
+**產出**：`docs/papers/rayleigh_quotient_noise_floor_en.tex` + build 腳本 + 生成的 PDF
 
 ---
 
 ### 對比
 
-| 維度 | A：Layer 4 demo 整合 | B：NNI_ha port |
-|---|---|---|
-| 工作量 | 2-3h | 2-4h |
-| 風險 | 低（pattern 已驗證） | 低（hazard analysis 已覆蓋） |
-| 立即價值 | 所有演算法可互動 demo、對比 HNI/NNI | paper benchmark 可重現 |
-| 適合時機 | 想看端到端產品化成果 | 想重現研究實驗 |
+| 維度 | A：CP7 UI 擴展 | B：NNI_ha port | C：LaTeX 轉換 |
+|---|---|---|---|
+| 工作量 | 2–3h | 2–4h | 0.5–1h |
+| 風險 | 中（UI mode 切換邏輯新） | 低（hazard 已覆蓋） | 低（content 已就緒） |
+| 立即價值 | 對比 benchmark 可跑 | paper 實驗可重現 | 研究分發用 PDF 有了 |
+| 適合時機 | 想繼續推 demo 完整度 | 想重現研究結果 | 想收尾英文筆記 |
 
 ---
 
@@ -341,11 +402,12 @@ claude
 > 我回來了。用 `git log --oneline` 看進度、`cat PROGRESS.md` 看下個動作。
 
 Claude 會：
-1. 讀 PROGRESS.md 了解 Day 1-4 完整狀態
+1. 讀 PROGRESS.md 了解 Day 1-5 完整狀態
 2. 讀 memory（10 條、可主動 Read）
 3. 看 `docs/algorithms_status.md` 了解三個演算法系統現況（1 分鐘）
-4. 確認下一個動作是 Session 5 的 A 或 B（或其他方向）
-5. 在使用者同意後啟動 Session 5
+4. 看 `docs/papers/rayleigh_quotient_noise_floor_en.md`（Day 5 新增的 NNI 研究筆記）
+5. 確認下一個動作是 Session 6 的 A / B / C（或其他方向）
+6. 在使用者同意後啟動 Session 6
 
 ---
 
@@ -355,6 +417,7 @@ Claude 會：
 |---|---|
 | `PROGRESS.md`（本檔） | Session checkpoint、下一步指南 |
 | `docs/algorithms_status.md` | 三個演算法系統（NNI/HNI/Multi）整體狀態 |
+| `docs/papers/rayleigh_quotient_noise_floor_en.md` | NNI 研究筆記英文版（Day 5 新增、KaTeX 清理後純 LaTeX source） |
 | `matlab_ref/hni/README.md` | HNI port 進度表 |
 | `matlab_ref/GLOBAL_INVENTORY.md` | 1304 個 `.m` 檔全局地圖 |
 | `matlab_ref/NNI_HNI_inventory.md` | HNI/NNI 線的詳細盤點（含 Section H：NNI canonical 決策） |
@@ -362,7 +425,9 @@ Claude 會：
 | `docs/superpowers/specs/2026-04-21-streamlit-demo-v0-design.md` | Demo v0 正式 spec |
 | `docs/superpowers/notes/nni_hazard_analysis.md` | NNI port 階段 A 的 hazard analysis（653 行） |
 | `python/tensor_utils.py` | Layer 1/2/3 共 8 個函式（5 工具 + Multi + HONI + NNI） |
-| `python/streamlit_app/demo_v0.py` | 6 個函式的 Streamlit UI（待擴到 9） |
+| `python/streamlit_app/demo_v0.py` | Router（79 行）、dispatch 到 problem → algorithm 兩層 |
+| `python/streamlit_app/_internal/` | Layer 1/2 utilities（UI 隱藏、保留可 import） |
+| `python/streamlit_app/problems/tensor_eigenvalue/` | 4 個 Layer 3 renderer + Q7 defaults |
 | `.gitignore` | 已排除 `.venv/`、`*.mat`、`.DS_Store`、`__pycache__/`、`source_code/` |
 
 ---
@@ -379,5 +444,9 @@ Claude 會：
 - [x] **Rayleigh quotient noise floor 分析 + 跨三演算法 fragility 模式整合**
 - [x] memory 寫入（10 條）
 - [x] 演算法系統 milestone 文件（`docs/algorithms_status.md`、重構自 `hni_status.md`）
-- [ ] Layer 4：demo 加 Multi + HONI + NNI（Session 5 選項 A）
-- [ ] NNI_ha port（Session 5 選項 B）
+- [x] **Layer 4 demo 整合**（**Day 5 CP1–CP5 完成、Multi + HONI + NNI + HONI vs NNI tile 全部上線**）
+- [x] **Streamlit 架構重構**（**Day 5 CP6 完成、problem-driven 兩層選單、demo_v0.py 削減至 79 行**）
+- [x] **研究筆記英文版 + KaTeX 清理**（**Day 5 完成、`docs/papers/rayleigh_quotient_noise_floor_en.md`**）
+- [ ] CP7 多跳對比模式 + 檔案上傳（Session 6 選項 A）
+- [ ] NNI_ha port（Session 6 選項 B）
+- [ ] 英文筆記 LaTeX/PDF（Session 6 選項 C）
