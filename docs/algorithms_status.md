@@ -65,6 +65,19 @@ test case 完全複製 Multi Q5 / HONI Q4 參數（rng=42, n=20, m=3, d∈[1,11]
 - `matlab_ref/nni/generate_nni_reference.m` — Q7 driver
 - `docs/superpowers/notes/nni_hazard_analysis.md` — 653 行階段 A 產出（commit `ab454ea`）
 
+### NNI_ha 變體（Day 6 新增、`halving=True` kwarg）
+
+2020 paper `Test_Heig2.m` benchmark 實際呼叫的是 `NNI_ha.m`（halving 啟用版）、跟 canonical `NNI.m` 差異 100% halving-only（`step_length` subfunction 的 halving while 從註解變 active + `tol_theta` 從 1e-8 dead code 改 1e-12）。Python port 選 A：`nni(..., halving=False, tol_theta=1e-12)` 兩 kwarg、`halving=False` 預設 bit-identical to canonical（Session 4 backward compat）、`halving=True` mirror NNI_ha.m line 167-186。
+
+**Q7 case parity (`halving=True`)**：iter 0-29 bit-identical、iter 30 起 noise-floor 分岔；最終 λ bit-identical（\|Δλ\|=3.02e-14）、但兩端跑完全不同路徑（MATLAB 59 iter/109 halving vs Python 32/19）。parity 框架新增 **multi-canary k_star** 偵測切點、Tier 1 STRICT 縮到 `[0:k_star)`。詳 `memory/feedback_nni_ha_path_lottery.md`（**不是新 fragility、是 §1 NNI Rayleigh quotient noise floor 的 halving 延伸**）。
+
+新增 Port 檔案：
+- `matlab_ref/nni/NNI_ha_with_history.m` — `NNI_ha.m` GE 路徑 + halving active + 7 欄 history
+- `matlab_ref/nni/generate_nni_ha_reference.m` — Q7 driver（tol=1e-10 match canonical）
+- `matlab_ref/nni/nni_ha_reference.mat` — reference .mat（入 repo、跟 canonical 同策略）
+- `python/test_nni_ha_parity.py` — GATE + multi-canary k_star + Tier 1/2/3
+- `docs/superpowers/notes/nni_hazard_analysis.md` §九（9.1-9.6 addendum）
+
 ---
 
 ## 2. HONI —「HNI 線另一個角度」
@@ -145,15 +158,18 @@ test case 完全複製 Multi Q5 / HONI Q4 參數（rng=42, n=20, m=3, d∈[1,11]
 
 ---
 
-## 6. 三種 fragility 模式摘要（port 時的「原碼無罪」憑據）
+## 6. Fragility 模式摘要（port 時的「原碼無罪」憑據）
+
+分類維持**三主類別**（halving / shift-invert / Rayleigh）、其中 #3 有 halving-amplified subtype（Day 6 NNI_ha 揭露、非新類別）。
 
 | Fragility | 觸發者 | 表現 | 對應 memory | 未來 port 類似演算法時的 tier 策略 |
 |---|---|---|---|---|
 | **halving sweet spot** | Multi | m≥3 random AA 下 halving trap-and-diverge、無 healthy 區間 | `feedback_multi_halving_fragility.md` | 延後到 integration test 觸發、別硬 exercise |
 | **shift-invert global** | HONI | `lambda_U → eigenvalue` 時 `(λ·II - AA)` 近奇異、`y` 量級 O(10^6) | `feedback_honi_multi_fragility_propagation.md` | y-like 欄位用 rtol、last-iter 進 APPROX tier |
 | **Rayleigh quotient local** | NNI | `min(x_i) → 0` 時 `tpv/x^(m-1)` 除法放大 rounding | `feedback_nni_rayleigh_quotient_noise_floor.md` | overlap 比對 + final APPROX + extra-iter INFO |
+| **Rayleigh-quotient path lottery（#3 的 halving 擴展）** | NNI_ha (`halving=True`) | 同 #3 的 noise-floor rounding、但 halving 決策把「停止 lottery」放大成「整路徑 lottery」；iter 0-29 bit-identical、之後 5 個欄位同時分岔、最終 λ 仍 bit-identical | `feedback_nni_ha_path_lottery.md`（沿用 #3 `feedback_nni_rayleigh_quotient_noise_floor.md` 基礎） | multi-canary k_star + Tier 1 `[0:k_star)` + Tier 3 `[k_star:K_common)` INFO |
 
-**通則**：未來 port 新演算法前、先判斷屬於哪種 fragility 模式（或全新模式）、對應的 tier 策略直接複用。
+**通則**：未來 port 新演算法前、先判斷屬於哪種 fragility 模式（或主類別的 subtype、或全新模式）、對應的 tier 策略直接複用。
 
 ---
 

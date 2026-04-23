@@ -24,26 +24,27 @@
 **Day 3 收工狀態（2026-04-22）**：補齊 Day 2 末未及時收尾的文件 — 寫入 `memory/feedback_honi_multi_fragility_propagation.md`（第 9 條 memory）、更新 PROGRESS.md 到 Layer 3 完成、新增 `docs/hni_status.md` HNI 系統里程碑文件。**HNI 線 Layer 1/2/3 全綠**。
 **Day 4 收工狀態（2026-04-22）**：Session 4 完成 — **NNI canonical port（使用者主演算法）** 全綠。階段 A 寫 `docs/superpowers/notes/nni_hazard_analysis.md`（653 行、12 open questions 全拍板）；階段 B 實作 `nni()` 函式（`linear_solver in {'spsolve','gmres'}`、Python scope 擴展大 sparse 支援）+ parity 3-Tier 框架（overlap STRICT + final APPROX + extra-iter INFO）+ 寫入 `memory/feedback_nni_rayleigh_quotient_noise_floor.md`（第 10 條 memory、揭露 Rayleigh quotient noise floor `machine_eps/min(x_i)^(m-1)`）。**三個核心演算法（NNI + HONI + Multi）全部 port 完、parity 全綠**、milestone 文件重構為 `docs/algorithms_status.md`。
 **Day 5 收工狀態（2026-04-23）**：Session 5 完成 — **Layer 4 demo 整合 + 架構重構**。CP1–CP5 把 Multi + HONI + NNI 三個 renderer 加進 Streamlit + HONI vs NNI 對比 tile（3-tab、cross-validate \|Δλ\| = 1.8e-15 machine epsilon）；CP6 重構為 **problem-driven 兩層選單**、`demo_v0.py` 從 961 行削減到 79 行（92% 削減）、`_internal/` 放 Layer 1/2 utilities、`problems/tensor_eigenvalue/` 放 Layer 3 algorithms、零 helper 重複（grep 實地 verify）。同時新增 `docs/papers/rayleigh_quotient_noise_floor_en.md`（NNI 研究筆記英文版、KaTeX 亂碼已清）。**三核心演算法端到端可互動 demo、研究主軸 HNI vs NNI 對比在 demo 首頁級可見**。
+**Day 6 收工狀態（2026-04-24）**：Session 6 做完兩題 — **CP7 UI 擴展（選項 A）+ NNI_ha port（選項 B）**。CP7a 加 `.mat/.npz` 上傳支援 4 個 Layer 3 renderer、CP7b-1/b-2 加 eigenvalue 和 multilinear solver 的 multi-run 對比模式（ALGORITHMS 4 → 6 entries、upload + comparison 正交可組合）。NNI_ha port 走 Phase 0-3：diff 分析（100% halving-only、3 處差異）→ hazard §九 addendum（9.1-9.6 共 83+ 行）→ `nni()` 加 `halving=False / tol_theta=1e-12` 兩 kwarg（backward compat bit-identical）→ parity on Q7 揭露 **halving=True 把 noise-floor stopping lottery 擴成 full-path lottery**（MATLAB 59 iter / 109 halving vs Python 32 / 19、最終 \|Δλ\|=3e-14 bit-identical）。parity 框架新增 **multi-canary k_star 偵測 + [k_star:K_common) Tier 3 INFO 降級**、可重用於其他 shift-invert / Rayleigh-quotient 類 solver port。Fragility 分類仍維持三種、#3 `Rayleigh quotient local` 新增 halving-amplified subtype 標籤。
 
-**下一步（Session 6）三選一、待使用者決定**：
-- **選項 A**：CP7 — 多跳對比模式 + 檔案上傳（延續 Day 5 UI 工作、2-3h）
-- **選項 B**：NNI_ha port — 2020 paper `Test_Heig2.m` benchmark 重現（halving 啟用版、2-4h、hazard analysis 已覆蓋）
-- **選項 C**：LaTeX 轉換 — 英文研究筆記 → tex + PDF（0.5-1h）
+**下一步（Session 7）三選一、待使用者決定**：
+- **選項 A**：LaTeX 轉換 — 英文研究筆記 → tex + PDF（0.5–1h）
+- **選項 B**：`main_Heig.m` driver port — 2020 paper `Test_Heig2.m` benchmark 完整重現（halving 支援 Day 6 已備、2–3h）
+- **選項 C**：其他類別 port（Optimization/QP、NLS/BEC、M-matrix、GINI）— 見 `matlab_ref/GLOBAL_INVENTORY.md`
 - 對比表見 `PROGRESS.md` 的「下一個動作」section
 
 長期願景：所有研究演算法都有 Python port + parity + Streamlit demo；`source_code/` 的 490MB MATLAB 遺產變成一個活的、可 reproduce 的個人工具箱。
 
 ---
 
-## 2. 新 session 必讀 — 10 條 memory
+## 2. 新 session 必讀 — 11 條 memory
 
-Claude Code 的 memory auto-load 機制在當前版本**實測沒有自動載入**（Day 2-4 session 開場 context 裡 MEMORY.md 索引會出現、但個別 memory 內容不會自動展開）。為避免下次又遺漏，**新 session 一開始請主動 `view` 下列 10 條 memory 一遍**：
+Claude Code 的 memory auto-load 機制在當前版本**實測沒有自動載入**（Day 2-4 session 開場 context 裡 MEMORY.md 索引會出現、但個別 memory 內容不會自動展開）。為避免下次又遺漏，**新 session 一開始請主動 `view` 下列 11 條 memory 一遍**：
 
 **路徑**：`/Users/csliu/.claude/projects/-Users-csliu-Projects-my-toolbox/memory/`
 
 | 檔案 | 類別 | 一行摘要 |
 |---|---|---|
-| `MEMORY.md` | 索引 | 其他 10 條的快速 overview |
+| `MEMORY.md` | 索引 | 其他 11 條的快速 overview |
 | `user_role.md` | user | 使用者角色、溝通語言、collaboration 風格 |
 | `project_layout.md` | project | `~/Projects/my-toolbox` 結構 + venv 位置 + 與 Google Drive mirror 的關係 |
 | `project_matlab_environment.md` | project | 本機 MATLAB **沒有** Image Processing Toolbox — reference 實作只能用 base MATLAB |
@@ -54,6 +55,7 @@ Claude Code 的 memory auto-load 機制在當前版本**實測沒有自動載入
 | `feedback_multi_halving_fragility.md` | feedback | **Day 2 新增**：Multi.m 的 halving path 在 m≥3 + random AA 沒有「健康 halving」sweet spot；halving 的 parity 延後到 HONI integration test |
 | `feedback_honi_multi_fragility_propagation.md` | feedback | **Day 3 新增**：HONI shift-invert 在收斂尾段 near-singular、y 量級爆增；y-like 欄位 parity 一律 rtol；inexact ~50× 比 exact 敏感；最終 λ/x 仍 bit-identical；三 Tier 框架可重用於任何 shift-invert 演算法 |
 | `feedback_nni_rayleigh_quotient_noise_floor.md` | feedback | **Day 4 新增**：NNI 的 Rayleigh quotient noise floor 公式 `machine_eps/min(x_i)^(m-1)`；tol 同量級時停止條件浮點抽籤；parity tier 設計原則（overlap STRICT + final APPROX + extra-iter INFO）；與 halving/shift-invert 並列**第三種 fragility 模式** |
+| `feedback_nni_ha_path_lottery.md` | feedback | **Day 6 新增**：`nni(halving=True)` 把 Rayleigh quotient noise-floor 的 stopping lottery 擴成 full-path lottery（**不是新 fragility、是 #3 的 halving 延伸**）；iter 0-29 bit-identical 之後 attained-index flip 使 lambda_L/chit/hit/res/x 五個欄位同時分岔；multi-canary k_star 偵測切點 + Tier 1 STRICT `[0:k_star)` + Tier 3 INFO `[k_star:K_common)` 的 parity pattern 可重用於其他 shift-invert / Rayleigh 類 solver |
 
 **開 session 建議動作**：
 ```bash

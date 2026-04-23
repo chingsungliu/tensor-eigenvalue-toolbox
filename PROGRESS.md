@@ -1,7 +1,7 @@
 # PROGRESS.md — Session checkpoint
 
-**最後更新**：2026-04-23（Day 5 收工）
-**狀態**：**Layer 4 demo 整合完成** + **架構重構為 problem-driven 兩層選單** — Multi/HONI/NNI 三個 renderer + HONI vs NNI 對比 tile 全部上線、Streamlit demo `_internal/` + `problems/tensor_eigenvalue/` 分層。三個核心演算法（Multi + HONI + NNI）和英文版研究筆記一併完成。
+**最後更新**：2026-04-24（Day 6 收工）
+**狀態**：**Session 6 雙題完成** — CP7 UI 擴展（檔案上傳 + multi-run 對比、ALGORITHMS 6 entries）+ NNI_ha port（`halving=True` kwarg、Phase 0-3、multi-canary k_star parity 框架）。四個 Layer 3 演算法（Multi + HONI + NNI + NNI_ha）port + parity 全綠；memory 11 條；fragility 分類仍維持三種、新增 #3 的 halving-amplified subtype。
 
 ---
 
@@ -316,11 +316,90 @@ Helper 歸屬經 grep 實地 verify、零重複：
 
 ---
 
-## Git state（Day 5 收工）
+## Day 6 (2026-04-24) 完成摘要 — Session 6 雙題：CP7 UI 擴展 + NNI_ha port
 
-Day 5 新增（topmost、5 筆）：
+Session 6 原本三選一（CP7 UI 擴展 / NNI_ha port / LaTeX 轉換）、本日做完前兩個、LaTeX 延後 Session 7。
+
+### 一、CP7 — Streamlit demo UI 擴展（選項 A）
+
+三個 sub-checkpoint、ALGORITHMS dict 從 4 → 6 entries、upload 和 multi-run compare **正交可組合**（上傳的 AA 可餵任一 comparison mode）。
+
+**CP7a — 檔案上傳** (commit `bd0d919`)：
+- `problems/tensor_eigenvalue/uploads.py` 189 行、reserved key (`AA` / `A_tensor` / `x0`) 優先 + auto-detect fallback、同時支援 2-D mode-1 unfolding 和 m-D full tensor（`ten2mat(k=0)` auto-unfolding）、`.mat` / `.npz` / scipy.sparse.save_npz 三格式
+- `algorithms.py` 4 個 renderer 各加 `Data source` radio + file_uploader，m/n upload 時 disabled & prefilled
+- 8 unit tests 全綠（含 bad x0 shape / no-tensor / bad extension 的 error path）
+
+**CP7b-1 — Eigenvalue solver 多-run 對比** (commit `a96dbdd`)：
+- `render_eigenvalue_compare`：2 或 3 runs、每 run 獨立選 HONI/NNI + tol/maxit/solver、共用 AA + initial_vector
+- 垂直堆疊 layout（break col_in/col_out pattern、適合 comparison 天然橫向並排）
+- 不用 `st.form`（algorithm radio 切換要 immediate rerun 讓 solver options 改）
+- Smoke test: 3-run mixed (HONI exact + NNI spsolve + NNI gmres@1e-12) 全收到 λ=10.75623426、max |Δλ|=1.8e-15
+
+**CP7b-2 — Multilinear solver tol-sweep** (commit `a93d6af`)：
+- `render_multilinear_compare`：2 或 3 Multi runs、只 vary tol（Multi 無 maxit/solver kwarg）
+- 預設 tol: Run 1=1e-8, 2=1e-10, 3=1e-12（讓 fresh user 看到有意義 sweep）
+- Q7 Multi well-conditioned、三 tol 於 scaled 停止條件下都 nit=5 收到同結果（這是 Multi 本質、非 demo bug）
+
+### 二、NNI_ha port（Session 6 選項 B、Phase 0-3）
+
+Session 4 port 的 canonical `NNI.m` 是 halving 註解版；`Test_Heig2.m` paper benchmark 呼叫的 `NNI_ha.m` 是 halving active 版。本日 port NNI_ha、補上重現 paper 實驗的能力。
+
+**Phase 0 — diff 分析**：`NNI.m` vs `NNI_ha.m` 兩檔各 270 行 ASCII；Unix `diff` 只 3 處差異（函式名 / `tol_theta` 1e-8 dead code vs 1e-12 / 13 行 halving while block 註解 vs active）；差異全集中在 `step_length` subfunction、100% halving-only、零 substantive 差異。推薦選項 A：`nni(halving=False, tol_theta=1e-12)` 兩 kwarg。
+
+**Phase 1 — hazard §九 addendum**：`nni_hazard_analysis.md` 653 → 736 行（+83）加 §9.1-9.5。列三個開放問題（`tol_theta` default / `hit` 計數型別 / `hit_per_outer_history` dead→live 語意）全採最小變動答案；新增「Halving break 後非單調 λ_U」風險（MATLAB 原碼主 loop 無 fallback、port 照抄）。
+
+**Phase 2 — `nni()` port** (commit `a1a334b` 內含)：7 個 surgical edits（signature + 5 段 docstring + step_length `if halving:` 分支）。halving=True 逐字 mirror NNI_ha.m line 167-186。Backward compat 驗證：`test_nni_parity.py` + `test_nni_basic` bit-identical to Session 4。
+
+**Phase 3 — parity test + MATLAB reference** (commit `a1a334b`)：新增 `NNI_ha_with_history.m` (188) + `generate_nni_ha_reference.m` (129) + `test_nni_ha_parity.py` (362) + `nni_ha_reference.mat` (入 repo、force-added、跟 canonical 同策略)。
+
+**Parity empirical finding（§9.6 補記）**：
+- **iter 0-29 bit-identical**（前 30 slot 各 history 欄位全 machine-eps 內一致）
+- **iter 30 noise-floor 分岔**：`min(temp)` 的 attained-index 在 MATLAB / Python 抽籤 flip、`lambda_L / res / chit / hit / x_history` 五個欄位同時 diverge
+- **`halving=True` 把 stopping lottery 擴成 full-path lottery**：
+  - MATLAB: nit=59, chit(halving)=109
+  - Python: nit=32, chit=19
+  - 最終 λ **bit-identical** |Δλ|=3.02e-14，eigenvector rel=4.44e-16
+- **Parity 框架新增 multi-canary k_star**：掃 lambda_U/L / res / chit / hit / y_history 5 canaries 取最早 first_bad_iter、Tier 1 STRICT 縮到 `[0:k_star)`、`[k_star:K_common)` 降 Tier 3 INFO。`y_history` 單一 canary 晚一步（y 在 iter k 開頭用 iter k-1 的 clean x 算、attained-index flip 在 iter k 末才發生）、multi-canary 設計接住這種時間差
+- **`print_neighborhood` bug fix**：clip `hi` 到 `min(len_ml, len_py)`、防 asymmetric-length 序列 IndexError
+
+Q7 case final 結果：
+| Tier | 結果 | 備註 |
+|---|---|---|
+| GATE | PASS | ML hit=109, PY hit=19（halving exercised 驗證）|
+| Tier 1 STRICT [0:30) | 8/8 PASS | 各欄位 max err ≤ 2.84e-13 |
+| Tier 2 APPROX | PASS | \|Δλ\|=3.02e-14、x rel=4.44e-16 |
+| Tier 3 INFO | 記錄 | [30:32) 各欄位 diff、MATLAB 多 27 iter noise-floor 震盪 |
+
+### 三、Fragility 模式擴充 — Rayleigh noise floor 的 halving-amplified 版本
+
+**這不是第四種 fragility**、是 **#3 既有 `Rayleigh quotient local`**（NNI canonical 就揭露的現象、Day 4 memory `feedback_nni_rayleigh_quotient_noise_floor.md` 記錄）的 halving 延伸版本。`halving=True` 啟用時、每輪 Newton 多一個「`lambda_U_new > lambda_U + 1e-13` 才 halve」的 attained-index check；同一個 noise-floor rounding 差就在此處從「只影響停止條件」擴成「影響整個 halving 決策路徑」。結果是 MATLAB / Python 從某個 iter 起走完全不同路徑、但最終 λ 仍 bit-identical（Tier 2 PASS）。
+
+memory 新增 `feedback_nni_ha_path_lottery.md`（Day 6 第 11 條）記錄 **parity pattern**（multi-canary k_star + Tier 1 STRICT `[0:k_star)` + Tier 3 INFO `[k_star:K_common)`）、**不記錄成新 fragility 類別**。對應 fragility 分類仍維持三種、只是 #3 增加「halving-amplified」subtype 標籤。
+
+### 四、Streamlit demo 發布狀態驗證
+- `.venv/bin/streamlit run streamlit_app/demo_v0.py` headless boot 三次（CP7a / CP7b-1 / CP7b-2 後）全綠：health 200 / home 200 / log 無 error
+- `.venv/bin/python test_nni_parity.py` + `test_nni_ha_parity.py` + `test_tensor_utils.py::test_nni_basic` 全綠
+
+---
+
+## Git state（Day 6 收工）
+
+Day 6 新增（6 筆）：
 
 ```
+<pending3> Add memory note #11: NNI_ha halving-amplified path lottery
+<pending2> Update project docs after Session 6 Option B completion (NNI_ha port)
+a1a334b   Port NNI_ha (halving variant) with parity framework extensions
+a93d6af   Add multilinear solver comparison mode (CP7b-2)
+a96dbdd   Add eigenvalue solver comparison mode (CP7b-1)
+bd0d919   Add tensor upload support to Layer 3 renderers (CP7a)
+```
+
+Day 5 結束時：
+
+```
+0344ec8 Update CLAUDE.md context loader for Day 5 completion
+8614197 Update PROGRESS.md after Day 5 (Layer 4 demo + architecture restructure)
 068d894 Restructure demo to problem-driven two-level navigation (CP6)
 817ccf8 Add HNI vs NNI comparison tile to Streamlit demo (CP5 Part B)
 0e40f03 Integrate Layer 3 (Multi + HONI + NNI) into Streamlit demo (Session 5 Layer 4)
@@ -340,38 +419,14 @@ ab454ea Add NNI.m hazard analysis before port (Session 4 階段 A)
 
 ---
 
-## 下一個動作：Session 6 — 三選一（待使用者決定）
+## 下一個動作：Session 7 — 三選一（待使用者決定）
 
-### 選項 A：CP7 — 多跳對比模式 + 檔案上傳
-
-**為什麼**：
-- Day 5 CP6 的 UI 工作自然延伸。目前 demo 只有「Q7 預設 + 單跳跑」、CP7 會加：
-  - 多跳對比 mode（同一 renderer 多次執行、不同參數、結果並排）
-  - 自訂 AA 上傳（user 帶自己的 tensor 來 benchmark）
-
-**預計工作量**：2–3 小時
-
-**產出**：`demo_v0.py` 的 sidebar 多一個 "Mode" 切換（single / compare），algorithm renderer 支援兩個 mode；上傳組件在 defaults.py 旁新增
-
----
-
-### 選項 B：NNI_ha port — 2020 paper benchmark 重現
-
-**為什麼**：
-- `Test_Heig2.m` benchmark 實際呼叫 `NNI_ha`（halving 啟用版）、不是 canonical `NNI.m`
-- 重現 2020 paper HNI vs NNI 實驗需要此版本
-
-**預計工作量**：2–4 小時。hazard analysis 已覆蓋、只是加 halving `while` 分支（`θ /= 2`、`tol_theta = 1e-12`）+ parity test。
-
-**產出**：`nni()` 加 halving 分支或獨立 `nni_ha()` + `test_nni_ha_parity.py` + `NNI_ha_with_history.m`
-
----
-
-### 選項 C：LaTeX 轉換 — 研究筆記 PDF 化
+### 選項 A：LaTeX 轉換 — 研究筆記 PDF 化（延續、Session 6 選項 C 未做部分）
 
 **為什麼**：
 - `docs/papers/rayleigh_quotient_noise_floor_en.md` 是可閱讀的 markdown、但如果要作為研究文件分發、LaTeX + PDF 格式更正式
 - 公式、table、section numbering 搬進 `\documentclass{article}` + `amsmath` 即可
+- NNI_ha empirical finding（§9.6）可考慮回填進英文筆記 §5 實務建議
 
 **預計工作量**：30–60 分鐘（內容已完整、只是 format 轉換）
 
@@ -379,14 +434,40 @@ ab454ea Add NNI.m hazard analysis before port (Session 4 階段 A)
 
 ---
 
+### 選項 B：`main_Heig.m` driver port — 2020 paper benchmark 完整重現
+
+**為什麼**：
+- 2020 paper `Test_Heig2.m` benchmark 實際呼叫 HNI + NNI_ha + 其他子程式比 timing / iteration count
+- halving 支援 Day 6 已備好、driver port 是 Layer 4.5 的完整化
+- port 完可直接產 paper-style timing table（Python 端 reproduce 實驗）
+
+**預計工作量**：2–3 小時
+
+**產出**：`python/main_Heig.py` + `matlab_ref/hni/main_Heig.m` 對應 + benchmark .mat 輸出
+
+---
+
+### 選項 C：其他類別 port
+
+**為什麼**：
+- Tensor Eigenvalue 整條線（Layer 1/2/3 + NNI canonical + NNI_ha）已完整
+- 下一階段可延伸到：Optimization/QP (ISM) / Nonlinear Schrödinger (BEC) / M-matrix iteration / Generalized Eigenvalue (GINI)
+- 見 `matlab_ref/GLOBAL_INVENTORY.md` 的 Section C
+
+**預計工作量**：視類別而定、數小時到一天
+
+**產出**：該類別的 Layer 1/2/3 + parity + demo renderer
+
+---
+
 ### 對比
 
-| 維度 | A：CP7 UI 擴展 | B：NNI_ha port | C：LaTeX 轉換 |
+| 維度 | A：LaTeX | B：main_Heig | C：其他類別 |
 |---|---|---|---|
-| 工作量 | 2–3h | 2–4h | 0.5–1h |
-| 風險 | 中（UI mode 切換邏輯新） | 低（hazard 已覆蓋） | 低（content 已就緒） |
-| 立即價值 | 對比 benchmark 可跑 | paper 實驗可重現 | 研究分發用 PDF 有了 |
-| 適合時機 | 想繼續推 demo 完整度 | 想重現研究結果 | 想收尾英文筆記 |
+| 工作量 | 0.5–1h | 2–3h | 視類別 |
+| 風險 | 低（content 已就緒） | 低（driver 邏輯簡單、halving 已備） | 中（新類別、可能有新陷阱）|
+| 立即價值 | 研究分發用 PDF 有了 | paper 實驗可完整重現 | 工具箱覆蓋其他數學領域 |
+| 適合時機 | 想收尾英文筆記 | 想 reproduce paper benchmark | 想拓寬工具箱廣度 |
 
 ---
 
@@ -442,11 +523,14 @@ Claude 會：
 - [x] shift-invert fragility 分析 + 三 Tier 框架記錄
 - [x] **Layer 3+ NNI port**（**Day 4 完成、spsolve + gmres、3-Tier parity 全綠**）
 - [x] **Rayleigh quotient noise floor 分析 + 跨三演算法 fragility 模式整合**
-- [x] memory 寫入（10 條）
+- [x] memory 寫入（Day 6 結束 11 條、新增第 11 條 `feedback_nni_ha_path_lottery.md`）
 - [x] 演算法系統 milestone 文件（`docs/algorithms_status.md`、重構自 `hni_status.md`）
 - [x] **Layer 4 demo 整合**（**Day 5 CP1–CP5 完成、Multi + HONI + NNI + HONI vs NNI tile 全部上線**）
 - [x] **Streamlit 架構重構**（**Day 5 CP6 完成、problem-driven 兩層選單、demo_v0.py 削減至 79 行**）
 - [x] **研究筆記英文版 + KaTeX 清理**（**Day 5 完成、`docs/papers/rayleigh_quotient_noise_floor_en.md`**）
-- [ ] CP7 多跳對比模式 + 檔案上傳（Session 6 選項 A）
-- [ ] NNI_ha port（Session 6 選項 B）
-- [ ] 英文筆記 LaTeX/PDF（Session 6 選項 C）
+- [x] **CP7 — Streamlit demo UI 擴展**（**Day 6 完成、upload + multi-run comparison、ALGORITHMS 6 entries**）
+- [x] **NNI_ha port**（**Day 6 完成、Phase 0-3、`halving=True` kwarg、multi-canary k_star parity 框架**）
+- [x] **Fragility 模式擴充 #3 halving-amplified subtype**（**Day 6、parity pattern 可重用於 shift-invert / Rayleigh 類 solver**）
+- [ ] 英文筆記 LaTeX/PDF（Session 7 選項 A）
+- [ ] `main_Heig.m` driver port（Session 7 選項 B）
+- [ ] 其他類別 port（Session 7 選項 C）
