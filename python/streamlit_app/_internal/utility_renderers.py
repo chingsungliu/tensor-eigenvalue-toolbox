@@ -58,7 +58,7 @@ def render_output_2d(arr) -> None:
         color_continuous_scale="Viridis",
         labels=dict(x="col", y="row", color="value"),
     )
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 
     st.caption(
         f"summary — max: {float(dense.max()):.6f},  "

@@ -1,0 +1,44 @@
+# Streamlit theme — academic light theme with deep-navy accent.
+# Reference: https://docs.streamlit.io/develop/api-reference/configuration/config.toml
+#
+# Streamlit looks up `.streamlit/config.toml` relative to the working
+# directory at launch. We place this at the repo root because:
+#   1. Streamlit Community Cloud runs from the repo root (P5 deployment).
+#   2. From the repo root, run with:
+#        python/.venv/bin/streamlit run python/streamlit_app/demo_v0.py
+#
+# Specific typography (Source Serif Pro for headings, JetBrains Mono for
+# code) is loaded via Google Fonts inside python/streamlit_app/assets/
+# styles.css; this file only sets palette + a base font category hint
+# because config.toml's `font` field only accepts a small enum.
+
+[theme]
+# Deep-navy academic accent. Drives: radio-selected dot, primary button,
+# slider thumb, link color, focus ring, default plotly first-series tint.
+primaryColor = "#1B4F72"
+
+# Main canvas — pure white for a paper-like reading surface.
+backgroundColor = "#FFFFFF"
+
+# Cool light gray for sidebar, code blocks, expander headers, and the
+# st.metric tile background. Slight cool undertone (not warm beige) keeps
+# the look aligned with the navy accent rather than fighting it.
+secondaryBackgroundColor = "#F5F7FA"
+
+# Near-black with a subtle blue undertone (Tailwind gray-800). Pure
+# #000000 is harsh against #FFFFFF; this preserves contrast while
+# softening the edges.
+textColor = "#1F2937"
+
+# Body-font category. The actual web font (Source Sans Pro / Source
+# Serif Pro) is enforced via styles.css because config.toml's `font`
+# only accepts "sans serif" / "serif" / "monospace".
+font = "sans serif"
+
+
+[client]
+# Hide Streamlit's "Deploy" button + other developer-facing toolbar
+# items. "minimal" keeps the hamburger menu (with safe items like
+# "Rerun" / "Settings") but drops Deploy. Use "viewer" to hide the
+# whole toolbar; we keep "minimal" so end-users can still rerun.
+toolbarMode = "minimal"

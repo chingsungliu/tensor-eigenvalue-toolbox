@@ -1,0 +1,116 @@
+/*
+ * Algorithm Toolbox demo — academic light theme custom CSS.
+ *
+ * Layers on top of `.streamlit/config.toml` (palette + base font hint).
+ * Design intent:
+ *   - Serif headings (Source Serif Pro) over sans-serif body for paper-
+ *     like reading hierarchy. Body keeps Streamlit's default Source
+ *     Sans Pro.
+ *   - JetBrains Mono for code (clear bracket pairs, no ligatures by
+ *     default — clean for MATLAB / Python listings).
+ *   - Thin gray borders (#E5E7EB Tailwind gray-200) on metric tiles,
+ *     forms, expanders. No drop shadows, no decorative gradients.
+ *   - Subtle navy underline on h2 (st.header) for section delineation.
+ *
+ * Selectors target Streamlit 1.50 data-testid conventions. If selectors
+ * break in a future Streamlit upgrade, headings/code/colors will still
+ * fall back to system fonts and config.toml palette.
+ */
+
+/* ---------- Web fonts ---------- */
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+Pro:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+
+/* ---------- Headings (serif) ---------- */
+h1, h2, h3, h4, h5, h6 {
+    font-family: 'Source Serif Pro', Georgia, 'Times New Roman', serif;
+    font-weight: 600;
+    color: #1B4F72;
+    letter-spacing: -0.01em;
+}
+
+/* st.header → h2: section delineation with thin navy underline. */
+h2 {
+    border-bottom: 1px solid #1B4F72;
+    padding-bottom: 0.4rem;
+    margin-bottom: 1rem;
+}
+
+/* st.subheader → h3: softer slate, no underline (sub-section role). */
+h3 {
+    color: #34495E;
+    font-weight: 500;
+}
+
+
+/* ---------- Code / monospace ---------- */
+code, pre, kbd, samp,
+[data-testid="stCodeBlock"] code {
+    font-family: 'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace;
+}
+
+/* st.code block: thin gray border; secondary bg already from config.toml. */
+[data-testid="stCodeBlock"] {
+    border: 1px solid #E5E7EB;
+    border-radius: 4px;
+}
+
+
+/* ---------- Metric tile ---------- */
+/* Thin gray border, no shadow. Serif numeric value for academic feel. */
+[data-testid="stMetric"] {
+    border: 1px solid #E5E7EB;
+    border-radius: 4px;
+    padding: 0.6rem 0.9rem;
+}
+
+[data-testid="stMetricValue"] {
+    font-family: 'Source Serif Pro', Georgia, serif;
+    font-weight: 600;
+    color: #1B4F72;
+}
+
+
+/* ---------- Form / Expander ---------- */
+[data-testid="stForm"] {
+    border: 1px solid #E5E7EB;
+    border-radius: 4px;
+    padding: 1rem;
+}
+
+[data-testid="stExpander"] {
+    border: 1px solid #E5E7EB;
+    border-radius: 4px;
+}
+
+
+/* ---------- Sidebar ---------- */
+/* Background already secondary from config.toml; just define the boundary. */
+[data-testid="stSidebar"] {
+    border-right: 1px solid #E5E7EB;
+}
+
+/* Sidebar h1 (st.title): the general h1 rule above gets overridden by
+ * Streamlit's emotion-CSS class on the title element (specificity
+ * battle). Re-declare font-family + color with !important to win, scoped
+ * narrowly to the sidebar title only. */
+[data-testid="stSidebar"] h1 {
+    font-family: 'Source Serif Pro', Georgia, 'Times New Roman', serif !important;
+    font-weight: 600;
+    color: #1B4F72;
+    font-size: 1.5rem;
+}
+
+
+/* ---------- Captions ---------- */
+[data-testid="stCaptionContainer"] {
+    font-style: italic;
+    color: #6B7280;
+}
+
+
+/* ---------- Dividers ---------- */
+hr {
+    border-color: #E5E7EB;
+    margin: 1.5rem 0;
+}

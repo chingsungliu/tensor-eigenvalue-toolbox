@@ -8,8 +8,8 @@ Layer 1 / 2 tensor utilities and gaussian_blur live in
 ``streamlit_app._internal.utility_renderers`` and are **not exposed in the UI
 router** by design — they remain importable for internal review.
 
-Run:
-    cd python && .venv/bin/streamlit run streamlit_app/demo_v0.py
+Run from the repo root (so .streamlit/config.toml is picked up):
+    python/.venv/bin/streamlit run python/streamlit_app/demo_v0.py
 """
 import sys
 from pathlib import Path
@@ -21,11 +21,26 @@ _python_dir = Path(__file__).resolve().parent.parent
 if str(_python_dir) not in sys.path:
     sys.path.insert(0, str(_python_dir))
 
+_ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+
 import streamlit as st
 
+from streamlit_app.about import render_about
 from streamlit_app.problems.tensor_eigenvalue.algorithms import (
     ALGORITHMS as TENSOR_EIGENVALUE_ALGORITHMS,
 )
+
+
+def _inject_custom_css() -> None:
+    """Inject assets/styles.css into the Streamlit page.
+
+    Layered on top of `.streamlit/config.toml`: heading serif, code mono,
+    thin gray borders for metric / form / expander tiles. Called once per
+    script run from `main()`.
+    """
+    css_path = _ASSETS_DIR / "styles.css"
+    css = css_path.read_text(encoding="utf-8")
+    st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
 
 
 # Two-level routing table.
@@ -40,10 +55,7 @@ PROBLEM_ALGORITHMS: dict = {
 
 def main() -> None:
     st.set_page_config(page_title="Algorithm Toolbox Demo", layout="wide")
-
-    st.warning(
-        "⚠️ Internal preview — 個人演算法工具箱、尚未對外發布。如遇錯誤請回報。"
-    )
+    _inject_custom_css()
 
     with st.sidebar:
         st.title("🧰 Algorithm Toolbox")
@@ -64,6 +76,18 @@ def main() -> None:
                 options=list(algorithms.keys()),
                 label_visibility="collapsed",
             )
+
+        st.divider()
+        if st.button(
+            "ℹ️ About this toolbox",
+            use_container_width=True,
+            key="sidebar_about_btn",
+        ):
+            st.session_state["show_about"] = True
+
+    if st.session_state.get("show_about", False):
+        render_about()
+        return
 
     if algorithms is None:
         st.info(

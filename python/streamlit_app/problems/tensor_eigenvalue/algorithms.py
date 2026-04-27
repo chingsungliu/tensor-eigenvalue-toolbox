@@ -56,7 +56,7 @@ def _plot_log_history(
         yaxis_title=y_label,
         yaxis_type="log" if log_y else "linear",
     )
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _plot_bar_vector(
@@ -73,7 +73,36 @@ def _plot_bar_vector(
         xaxis_title=x_label,
         yaxis_title=y_label,
     )
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _plot_grouped_bar(
+    series: dict,
+    title: str,
+    x_label: str = "component",
+    y_label: str = "value",
+) -> None:
+    """Grouped bar chart for two or more vectors over a shared index.
+
+    `series` maps legend label → 1-D array. All arrays must share the
+    same length; bars from each series are placed side-by-side at each
+    index. Used for cross-algorithm eigenvector comparison.
+    """
+    fig = go.Figure()
+    for name, arr in series.items():
+        arr = np.asarray(arr).flatten()
+        fig.add_trace(go.Bar(
+            x=list(range(len(arr))),
+            y=list(arr),
+            name=name,
+        ))
+    fig.update_layout(
+        title=title,
+        xaxis_title=x_label,
+        yaxis_title=y_label,
+        barmode="group",
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _gmres_info_summary(info_history) -> str:
@@ -247,6 +276,19 @@ def render_multi() -> None:
                 title="Residual convergence",
                 y_label="‖A·u^(m-1) - b^(m-1)‖",
             )
+
+            _plot_bar_vector(
+                history["hal_history"],
+                title="Halving steps per outer iter",
+                x_label="outer iteration",
+                y_label="halving count",
+            )
+            st.caption(
+                "**讀圖要點**：Multi 在每外層 Newton iter 嘗試的 halving 次數；"
+                "Q7 well-conditioned 通常 0、ill-conditioned case 才會 > 0 "
+                "（見 `feedback_multi_halving_fragility.md`）。"
+            )
+
             _plot_bar_vector(u, title="Final u (solution)", x_label="component")
 
     with st.expander("📄 對應的 MATLAB 原始碼"):
@@ -350,6 +392,7 @@ def render_honi() -> None:
             innit = result["innit"]
             outer_res = result["outer_res"]
             lam_hist = result["lam_hist"]
+            history = result["history"]
 
             mc1, mc2, mc3, mc4 = st.columns(4)
             mc1.metric("outer nit", outer_nit)
@@ -371,6 +414,19 @@ def render_honi() -> None:
                 y_label="λ_U",
                 log_y=False,
             )
+            _plot_bar_vector(
+                history["innit_history"],
+                title="Multi inner iterations per outer iter",
+                x_label="outer iteration",
+                y_label="inner iter count",
+            )
+            st.caption(
+                "**讀圖要點**：HONI 外層每步呼叫 Multi 跑 inner Newton iter；"
+                "shift-invert 在 `lambda_U → eigenvalue` 尾段 near-singular、"
+                "inner iter 顯著增加（fragility 來源、見 "
+                "`feedback_honi_multi_fragility_propagation.md`）。"
+            )
+
             _plot_bar_vector(x, title="Final x (eigenvector)", x_label="component")
 
     with st.expander("📄 對應的 MATLAB 原始碼"):
@@ -502,6 +558,20 @@ def render_nni() -> None:
                 y_label="λ",
                 log_y=False,
             )
+
+            min_x_per_iter = np.min(history["x_history"], axis=0)
+            _plot_log_history(
+                {"min(x_i)": min_x_per_iter},
+                title="min(x_i) per iteration",
+                y_label="min(x_i)",
+            )
+            st.caption(
+                "**讀圖要點**：`min(x_i)` 接近 0 時 Rayleigh quotient noise floor 觸發 — "
+                "停止條件浮點抽籤量級 `ε · n^(m-1) / min(x_i)^(m-1)` 主導 "
+                "（見 `feedback_nni_rayleigh_quotient_noise_floor.md` 第 10 條 memory + "
+                "`docs/papers/rayleigh_quotient_noise_floor_en.md` §4）。"
+            )
+
             _plot_bar_vector(x, title="Final x (eigenvector)", x_label="component")
 
     with st.expander("📄 對應的 MATLAB 原始碼"):
@@ -685,6 +755,34 @@ def render_hni_vs_nni() -> None:
                     "每步更激進），但每外層 iter 含 Multi 的 inner iter，總工作量需對比 "
                     "`HONI total inner` vs `NNI nit`。兩曲線最終常落到同一 noise floor "
                     "（見研究筆記 §4.6）。"
+                )
+
+                _plot_log_history(
+                    {
+                        "HONI λ": h["lam_hist"],
+                        "NNI λ_U": nn["lam_U_hist"],
+                        "NNI λ_L": nn["lam_L_hist"],
+                    },
+                    title="λ trajectory — HONI vs NNI (linear y)",
+                    y_label="λ",
+                    log_y=False,
+                )
+                st.caption(
+                    "**讀圖要點**：HONI 用雙層 shift-invert、NNI 用單層 Newton bracket — "
+                    "兩演算法走完全不同的 Newton 路徑、最終都收斂到同一 λ。"
+                )
+
+                # Sign-align NNI eigenvector to HONI for component-wise comparison.
+                sign = 1.0 if float(np.dot(h["x"], nn["x"])) >= 0 else -1.0
+                nn_x_aligned = sign * nn["x"]
+                _plot_grouped_bar(
+                    {"HONI x": h["x"], "NNI x (sign-aligned)": nn_x_aligned},
+                    title="Eigenvectors — HONI vs NNI (sign-aligned)",
+                    x_label="component",
+                )
+                st.caption(
+                    "**讀圖要點**：兩演算法的 eigenvector component-wise 一致 — "
+                    f"`‖x_HONI − x_NNI‖₂ = {x_diff:.2e}` machine-epsilon 內 cross-validate。"
                 )
 
     with st.expander("📄 對應的 MATLAB 原始碼 — HONI.m + NNI.m"):
@@ -908,6 +1006,28 @@ def render_eigenvalue_compare() -> None:
             "NNI 的 Newton iter 通常多；每步工作量不同（HONI 每外層含 Multi 內層、"
             "NNI 每步解一個 linear system）。同 AA 最終殘差落到同一 noise floor "
             "（量級 `machine_eps · n^(m-1) / min(x_i)^(m-1)`、見研究筆記 §4.6）。"
+        )
+
+        final_lams = [
+            run["lam"] if run["algorithm"] == "HONI" else run["lam_U"]
+            for run in runs
+        ]
+        short_labels = [f"Run {i + 1}" for i in range(len(runs))]
+        fig = go.Figure(go.Bar(
+            x=short_labels,
+            y=final_lams,
+            text=[f"{v:.10g}" for v in final_lams],
+            textposition="outside",
+        ))
+        fig.update_layout(
+            title="Final λ across runs (cross-validation)",
+            xaxis_title="run",
+            yaxis_title="λ",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption(
+            "**讀圖要點**：多 run 跑同一 tensor、final λ 應該 machine-epsilon 內一致 — "
+            "bar 高度肉眼相同 + text label 精確值對齊到 ~10 位小數即表示 bit-identical 收斂。"
         )
 
     with st.expander("📄 對應的 MATLAB 原始碼 — HONI.m + NNI.m"):
