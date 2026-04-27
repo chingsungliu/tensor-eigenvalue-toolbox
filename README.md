@@ -1,5 +1,7 @@
 # my-toolbox
 
+**Live demo**：<https://csliu-toolbox.streamlit.app>
+
 ## 這是什麼
 
 這個 repo 是一個**練習用 sandbox**，目的是建立「把 MATLAB 演算法 port 成 Python 並驗證數值一致性」的標準工作流程。目前還不是正式的演算法庫，裡面只有一個示範用的 `gaussian_blur` 實作、一套對帳機制，以及一份把踩過的坑寫下來的文件。

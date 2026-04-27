@@ -1,0 +1,109 @@
+my-toolbox session journal
+==========================
+
+
+Day 7 (2026-04-27 → 2026-04-28) — Streamlit demo 美化 + 部署
+------------------------------------------------------------
+
+Session 7 開場原本是 A/B/C 三選一（A LaTeX、B main_Heig driver、
+C 其他類別 port）。使用者改方向為選項 D：把現有 Streamlit demo 美化、
+推上 Streamlit Community Cloud，讓研究演算法成為對外可訪問的網站。
+理由：A/B/C 都是演算法 / 筆記方向、跟「對外可訪問」需求正交、
+而研究主軸 (HNI vs NNI cross-validate) 的 demo Day 5/6 已就緒、
+欠的只是 polish + 公開可訪問。
+
+Phase 規劃 5 步、實際執行跨兩天：
+
+P1 — GitHub repo + push
+  - 建立 public repo: chingsungliu/tensor-eigenvalue-toolbox
+    （Streamlit Community Cloud 免費版必須 public）
+  - 第一次 push 撞到 auth 問題：Claude bash 無 TTY、跳出
+    "Device not configured"
+  - 走 PAT + 真 Terminal.app 路徑、osxkeychain 自動存
+    後續無感
+  - 中途 PAT 不慎洩漏在對話 transcript、立刻 revoke 並重新生成
+  - 建立「不貼 PAT 進對話、走真 Terminal」的 SOP
+
+P2 — Streamlit theme + custom CSS
+  - 設計方向：學術 light theme、numpy.org 風骨 + 個人海軍藍
+  - .streamlit/config.toml: primaryColor #1B4F72、白底 + #F5F7FA 副底、
+    深灰文字、toolbarMode = "minimal" 隱藏 Deploy 按鈕
+  - python/streamlit_app/assets/styles.css (91 行):
+    Source Serif Pro 標題 + JetBrains Mono code + h2 navy 底線 +
+    細灰邊 (1px solid #E5E7EB) 無陰影
+  - sidebar h1 用 !important 強制 serif (跟 emotion-CSS specificity 抗衡)
+  - demo_v0.py 加 _inject_custom_css() helper、main() 開頭呼叫
+  - 同時修 3 處 st.plotly_chart 的 width="stretch" → use_container_width=True
+    (Streamlit 1.50 plotly_chart 沒 width 參數，落進 **kwargs 觸發 plotly warning)
+  - 驗證 st.dataframe / st.image 的 width="stretch"|"content" 是 1.50 first-class
+    參數 *不是* deprecated、5 個 utility_renderers 不動
+
+P3 — About page
+  - python/streamlit_app/about.py (128 行): bio + paper citations + GitHub
+  - 兩欄 layout: 左 Author/Contact (中英文姓名、系所、雙 email mailto、
+    phone、地址、個人網頁)、右 Research interests / Education / Academic positions
+  - 4 個 paper placeholder (PAPERS = [...])、未來填 BibTeX 改一行 dict
+  - 頂部「← Back to algorithms」button、走 session_state["show_about"] 路由
+  - sidebar 底部加 divider + 「ℹ️ About this toolbox」full-width button
+
+P4 — Result visualization (6 個新 plot)
+  覆蓋 5/6 個 renderer (render_multilinear_compare 不動)。新增
+  _plot_grouped_bar helper:
+
+    1 (C) min(x_i) per iter log [render_nni]
+    2 (A) Eigenvector grouped bar sign-aligned [render_hni_vs_nni]
+    3 (B) λ trajectory linear overlay 3 series [render_hni_vs_nni]
+    4 (G) Multi inner iter per outer bar [render_honi]
+    5 (E) Multi halving per outer bar [render_multi]
+    6 (I) Final λ across runs bar [render_eigenvalue_compare]
+
+  每 plot 都加「讀圖要點」caption + 引用 fragility memory / 研究筆記。
+  配色策略：不 override colorway、單 series 自動 navy、多 overlay 用
+  plotly default (navy + 橘 + 綠)、grouped bar navy + 橘對比。
+
+  整合 P2-P5 commit: b829b1c
+    "Add Streamlit demo theme, About page, and result visualization"
+  push 上 origin/main。
+
+P5 — Deploy to Streamlit Community Cloud
+  Day 7 上半場 (2026-04-27):
+    step 1+2 完成 — 拿掉 demo_v0 頂部 internal-preview warning、
+    requirements.txt 補 streamlit + plotly。
+    step 3 卡關 — share.streamlit.io 走 GitHub OAuth、持續 500 錯誤
+    無法 sign in。判斷是 GitHub 端短暫故障、決定 Day 8 retry。
+    本機 streamlit 留 PID 1088 / port 8501 不殺、隨時可 refresh 看效果。
+
+  Day 7 收尾 (2026-04-28):
+    GitHub OAuth 恢復正常、retry 成功:
+    - share.streamlit.io → New app
+    - Repository: chingsungliu/tensor-eigenvalue-toolbox
+    - Branch: main
+    - Main file: python/streamlit_app/demo_v0.py
+    - App URL subdomain: csliu-toolbox
+    Build 1-3 分鐘、redirect 到 https://csliu-toolbox.streamlit.app
+    驗證 checklist 全綠：首頁 numpy 風淺色 theme + sidebar 兩層選單 +
+    Multi 跑得起來 + About 頁可看 + Comparison tab 兩個新 plot 顯示
+
+收尾動作 (2026-04-28):
+  - 殺本機 streamlit PID 1088
+  - 更新 PROGRESS.md (P5 完成、Day 8 Level 2 Phase 1 規劃)
+  - 更新 README.md (開頭加 live demo URL)
+  - 新建 journal.txt (本檔)
+  - commit + push docs 改動
+
+Memory 寫入: 無新 memory (P1-P5 都是工程實作 / 部署、
+無新 fragility 或數值學發現)。
+
+
+現況:
+  - Live demo 上線: https://csliu-toolbox.streamlit.app
+  - GitHub: chingsungliu/tensor-eigenvalue-toolbox (public)
+  - Layer 1/2/3 + 4 個 Layer 3 演算法 (Multi / HONI exact+inexact /
+    NNI canonical+halving) port 全綠、parity 全過、Streamlit demo 完整覆蓋
+  - Memory 11 條、fragility 三類別 (halving / shift-invert /
+    Rayleigh quotient noise floor)
+  - Level 1 (port + parity + demo + 部署) 整條線完成
+
+
+下一步: Day 8 起 Level 2 (收斂速度優化)、Phase 1 Baseline & Profiling
+        Sub-step 1.1 明日詳細 prompt

@@ -1,7 +1,7 @@
 # PROGRESS.md — Session checkpoint
 
-**最後更新**：2026-04-24（Day 6 收工）
-**狀態**：**Session 6 雙題完成** — CP7 UI 擴展（檔案上傳 + multi-run 對比、ALGORITHMS 6 entries）+ NNI_ha port（`halving=True` kwarg、Phase 0-3、multi-canary k_star parity 框架）。四個 Layer 3 演算法（Multi + HONI + NNI + NNI_ha）port + parity 全綠；memory 11 條；fragility 分類仍維持三種、新增 #3 的 halving-amplified subtype。
+**最後更新**：2026-04-28（Day 7 完整收工、P5 deploy 成功）
+**狀態**：**Session 7 方向變更為 D（Streamlit demo 美化 + 部署）、P1-P5 全部完成**。Live demo 上線：<https://csliu-toolbox.streamlit.app>。GitHub repo `chingsungliu/tensor-eigenvalue-toolbox`（public）上 commit `b829b1c` build 成功部署。本機 streamlit process（PID 1088）已殺、cloud demo 為主。前置（Day 1-6）：4 個 Layer 3 演算法 port 全綠、memory 11 條、fragility 三類別。Day 8 起進 Level 2（收斂速度優化）Phase 1：Baseline & Profiling。
 
 ---
 
@@ -382,13 +382,117 @@ memory 新增 `feedback_nni_ha_path_lottery.md`（Day 6 第 11 條）記錄 **pa
 
 ---
 
-## Git state（Day 6 收工）
+## Day 7 (2026-04-27 → 2026-04-28) 完成摘要 — Session 7 方向變更（A/B/C → D：Streamlit demo 美化 + 部署）；P1-P5 全部完成、Live demo 上線
 
-Day 6 新增（6 筆）：
+### 一、Session 7 方向變更
+
+原計畫三選一（A LaTeX / B main_Heig / C 其他類別）、Session 7 開場後使用者**改方向為選項 D：Streamlit demo 美化 + 部署到 Streamlit Community Cloud**。
+
+理由：使用者真實目標是把多年研究演算法做成 UI 網站給同行訪問；研究主軸（HNI vs NNI cross-validate）的 demo Day 5/6 已就緒、欠的是 polish + 公開可訪問。A/B/C 都是演算法 / 筆記方向、跟「對外可訪問」需求正交。
+
+5 個 Phase 規劃（8h、簡化版）：
+- P1  GitHub repo + push (1h) ✓
+- P2  Streamlit theme + 自訂 CSS (1.5h) ✓
+- P3  About 頁 (1h) ✓
+- P4  收斂曲線 plot 強化 (1.5h) ✓
+- P5  Deploy to Streamlit Community Cloud (0.5h) ✓ **2026-04-28 上線**：<https://csliu-toolbox.streamlit.app>
+
+### 二、P1 — GitHub repo + push
+
+- 建立 GitHub repo `chingsungliu/tensor-eigenvalue-toolbox`（public、Streamlit Community Cloud 免費版需要）
+- repo URL：<https://github.com/chingsungliu/tensor-eigenvalue-toolbox>
+- 第一次 push 流程：本機 `git remote add` → push 失敗（auth: `Device not configured`、Claude bash 無 TTY）→ 走 PAT + 真 Terminal.app 路徑、osxkeychain 自動存
+- 中途有一次 PAT 洩漏在對話 transcript、立刻 revoke + 重新生成；建立「不貼 PAT 進對話、走真 Terminal」的 SOP
+
+### 三、P2 — Streamlit theme + custom CSS
+
+學術 light theme — numpy.org 風骨 + 個人海軍藍。
+
+**`.streamlit/config.toml`**（repo root、Streamlit Cloud + 本機 cwd=repo-root 都讀）：
+- `primaryColor = "#1B4F72"`（深海軍藍 academic accent）
+- `backgroundColor = "#FFFFFF"` / `secondaryBackgroundColor = "#F5F7FA"` / `textColor = "#1F2937"`
+- `[client] toolbarMode = "minimal"`（隱藏 Deploy 按鈕、保留 hamburger menu）
+
+**`python/streamlit_app/assets/styles.css`**（91 行）：
+- @import Source Serif Pro + JetBrains Mono Google Fonts
+- Headings serif + navy；h2 加 1px navy 底線（學術 section 感）
+- code/pre 用 JetBrains Mono；metric tile / form / expander 細灰邊（`1px solid #E5E7EB`、無陰影）
+- sidebar h1 用 `!important` 強制 serif（emotion-CSS specificity battle 解法）
+- 注入機制：`demo_v0.py` 加 `_inject_custom_css()` helper、`main()` 開頭呼叫
+
+**Plotly deprecation 修正**：3 個 `st.plotly_chart` call site 從 `width="stretch"` 改 `use_container_width=True`（Streamlit 1.50 plotly_chart signature 沒 `width` 參數、字串落進 `**kwargs` → forward 給 plotly → warning）。同時驗證 `st.dataframe` / `st.image` 的 `width="stretch"|"content"` 是 1.50 first-class 參數**不是** deprecated、5 個 utility_renderers 的 call 不動。
+
+本機 run 命令更新：`python/.venv/bin/streamlit run python/streamlit_app/demo_v0.py`（從 repo root、確保 config.toml 被讀到）。
+
+### 四、P3 — About page
+
+`python/streamlit_app/about.py` (128 行) — 研究者 bio + paper citations + GitHub link。
+
+- 兩欄 columns([1, 2])：左 Author/Contact（中英文姓名 + 系所 + 雙 email mailto + phone + 地址 + 個人網頁）、右 Research interests / Education / Academic positions
+- 4 個 paper placeholder（`PAPERS = [...]` constant、未來填 BibTeX 改一行 dict）
+- GitHub URL + 一句 source code 說明
+- 頂部「← Back to algorithms」button、走 session_state["show_about"] 路由
+
+**Sidebar 整合**：sidebar 底部加 `st.divider()` + 「ℹ️ About this toolbox」full-width button。Step 1/Step 2 hierarchy 不動。
+
+### 五、P4 — Result visualization (6 個新 plot + 1 個 helper)
+
+按優先順序加 6 個 plot、覆蓋 5/6 個 renderer。`render_multilinear_compare` 維持原樣不動。
+
+| # | Priority | Plot | Renderer | History 欄位 |
+|---|---|---|---|---|
+| 1 | (C) | min(x_i) per iter log | render_nni | `x_history` → `np.min(axis=0)` |
+| 2 | (A) | Eigenvector grouped bar (sign-aligned) | render_hni_vs_nni Comparison tab | `h["x"]` + `nn["x"]` + dot-sign flip |
+| 3 | (B) | λ trajectory linear overlay (3 series) | render_hni_vs_nni Comparison tab | `h["lam_hist"]` + `nn["lam_U_hist"]` + `nn["lam_L_hist"]` |
+| 4 | (G) | Multi inner iter per outer bar | render_honi | `history["innit_history"]` |
+| 5 | (E) | Multi halving per outer bar | render_multi | `history["hal_history"]` |
+| 6 | (I) | Final λ across runs bar | render_eigenvalue_compare summary | `run["lam"]` (HONI) / `run["lam_U"]` (NNI) |
+
+新 helper：`_plot_grouped_bar(series, title, ...)` — barmode="group" 兩 series 比對。
+
+每 plot 都加「**讀圖要點**」caption + 對應 memory / research note 引用（fragility 三類別 + Rayleigh quotient noise floor + path lottery）。配色全程不 override colorway、單 series 自動 navy、多 overlay 用 plotly default (navy + 橘 + 綠)、grouped bar navy + 橘對比。
+
+### 六、P5 — 部署成功（2026-04-28 上線）
+
+P5 step 1+2（Day 7 上半場）：
+- 拿掉 demo_v0.py 頂部 `st.warning("⚠️ Internal preview...")`（部署前一刻的決議）
+- `requirements.txt` 補 `streamlit + plotly`（原本只有 `numpy + scipy`、Cloud 跑 streamlit 必裝；保留 `requirements_ui.txt` 不動向後相容）
+- commit `b829b1c` — "Add Streamlit demo theme, About page, and result visualization" 整合 P2-P5
+- push 上 GitHub `origin/main`
+
+P5 step 3（Day 7 上半場暫停、2026-04-28 retry）：GitHub OAuth 恢復正常後重試、share.streamlit.io 部署成功。
+
+**Live demo URL**：<https://csliu-toolbox.streamlit.app>
+- Repository: `chingsungliu/tensor-eigenvalue-toolbox`
+- Branch: `main`
+- Main file: `python/streamlit_app/demo_v0.py`
+- 部署成功後驗證：首頁 numpy 風海軍藍 theme 正常 / sidebar 兩層選單 / About 頁 / 4 Layer 3 renderer 全部可跑
+
+### 七、本地 streamlit process 收尾
+
+Day 7 留的 PID 1088（background ID `bbmr7yz3w`、port 8501）Day 8 開場一併殺掉、cloud demo 為主、本機 demo 之後需要才重啟。
+
+### 八、Memory 寫入
+
+無新 memory（P1-P5 都是工程實作 / 部署、無新 fragility 模式或數值學發現）。
+
+---
+
+## Git state（Day 7 完整收工、2026-04-28）
+
+Day 7 上半場（1 筆、整合 P2-P5）：
 
 ```
-<pending3> Add memory note #11: NNI_ha halving-amplified path lottery
-<pending2> Update project docs after Session 6 Option B completion (NNI_ha port)
+b829b1c   Add Streamlit demo theme, About page, and result visualization
+            (P2 theme + P3 About + P4 6 plots + P5 deploy prep)
+```
+
+Day 7 收尾（docs 更新、本日新增）：見 `git log` 最新一筆 — 更新 PROGRESS.md（P5 deploy 完成、Day 8 Level 2 規劃）+ README.md（live demo URL）+ 新建 journal.txt。
+
+Day 6 結束時（6 筆）：
+
+```
+23d2d62   Update project docs after Session 6 Option B completion (NNI_ha port)
 a1a334b   Port NNI_ha (halving variant) with parity framework extensions
 a93d6af   Add multilinear solver comparison mode (CP7b-2)
 a96dbdd   Add eigenvalue solver comparison mode (CP7b-1)
@@ -419,55 +523,38 @@ ab454ea Add NNI.m hazard analysis before port (Session 4 階段 A)
 
 ---
 
-## 下一個動作：Session 7 — 三選一（待使用者決定）
+## 下一個動作：Day 8 — Level 2（收斂速度優化）Phase 1: Baseline & Profiling
 
-### 選項 A：LaTeX 轉換 — 研究筆記 PDF 化（延續、Session 6 選項 C 未做部分）
+Day 7 部署完成、Level 1（port + parity + demo + 部署）整條線完整。Day 8 起切到 **Level 2：收斂速度優化**。
 
-**為什麼**：
-- `docs/papers/rayleigh_quotient_noise_floor_en.md` 是可閱讀的 markdown、但如果要作為研究文件分發、LaTeX + PDF 格式更正式
-- 公式、table、section numbering 搬進 `\documentclass{article}` + `amsmath` 即可
-- NNI_ha empirical finding（§9.6）可考慮回填進英文筆記 §5 實務建議
+### Phase 1 任務概要
 
-**預計工作量**：30–60 分鐘（內容已完整、只是 format 轉換）
+**Sub-step 1.1**（Day 8 開場、明天會給詳細 prompt）：建立 benchmark suite — 為 4 個 Layer 3 演算法（Multi / HONI exact / HONI inexact / NNI spsolve）在固定 test cases 上 measure baseline 收斂速度（iter count、wall time、residual trajectory），作為後續 Phase 2+ 優化的對照基準。
 
-**產出**：`docs/papers/rayleigh_quotient_noise_floor_en.tex` + build 腳本 + 生成的 PDF
+**詳細 prompt 明天提供**、Day 7 不開新工作。
 
 ---
 
-### 選項 B：`main_Heig.m` driver port — 2020 paper benchmark 完整重現
+### Day 8 開場 checklist
 
-**為什麼**：
-- 2020 paper `Test_Heig2.m` benchmark 實際呼叫 HNI + NNI_ha + 其他子程式比 timing / iteration count
-- halving 支援 Day 6 已備好、driver port 是 Layer 4.5 的完整化
-- port 完可直接產 paper-style timing table（Python 端 reproduce 實驗）
+1. `git log --oneline -10` 看最近 commits（包含今日 docs 收尾的 commit）
+2. `cat PROGRESS.md` 看 Day 7 收工狀態 + Day 8 任務（本檔）
+3. 確認 cloud demo 仍正常：開 <https://csliu-toolbox.streamlit.app> 載入首頁
+4. 等使用者貼 Sub-step 1.1 詳細 prompt
 
-**預計工作量**：2–3 小時
+### 本機 streamlit 重啟（如果 Day 8 過程需要）
 
-**產出**：`python/main_Heig.py` + `matlab_ref/hni/main_Heig.m` 對應 + benchmark .mat 輸出
-
----
-
-### 選項 C：其他類別 port
-
-**為什麼**：
-- Tensor Eigenvalue 整條線（Layer 1/2/3 + NNI canonical + NNI_ha）已完整
-- 下一階段可延伸到：Optimization/QP (ISM) / Nonlinear Schrödinger (BEC) / M-matrix iteration / Generalized Eigenvalue (GINI)
-- 見 `matlab_ref/GLOBAL_INVENTORY.md` 的 Section C
-
-**預計工作量**：視類別而定、數小時到一天
-
-**產出**：該類別的 Layer 1/2/3 + parity + demo renderer
+Day 7 收尾已殺 PID 1088。需要時：
+```bash
+cd ~/Projects/my-toolbox
+python/.venv/bin/streamlit run python/streamlit_app/demo_v0.py --server.headless=true --server.port=8501
+```
 
 ---
 
-### 對比
+### 後續方向（Level 2 完成後、原 Session 7 A/B/C 三選一仍適用）
 
-| 維度 | A：LaTeX | B：main_Heig | C：其他類別 |
-|---|---|---|---|
-| 工作量 | 0.5–1h | 2–3h | 視類別 |
-| 風險 | 低（content 已就緒） | 低（driver 邏輯簡單、halving 已備） | 中（新類別、可能有新陷阱）|
-| 立即價值 | 研究分發用 PDF 有了 | paper 實驗可完整重現 | 工具箱覆蓋其他數學領域 |
-| 適合時機 | 想收尾英文筆記 | 想 reproduce paper benchmark | 想拓寬工具箱廣度 |
+A：LaTeX 轉換研究筆記 PDF 化（0.5–1h）／B：`main_Heig.m` driver port 重現 paper benchmark（2–3h）／C：其他類別 port（Optimization/QP、NLS/BEC、M-matrix、GINI、視類別工作量不一）。詳見前一版 PROGRESS.md（git log）或 `matlab_ref/GLOBAL_INVENTORY.md`。
 
 ---
 
@@ -531,6 +618,12 @@ Claude 會：
 - [x] **CP7 — Streamlit demo UI 擴展**（**Day 6 完成、upload + multi-run comparison、ALGORITHMS 6 entries**）
 - [x] **NNI_ha port**（**Day 6 完成、Phase 0-3、`halving=True` kwarg、multi-canary k_star parity 框架**）
 - [x] **Fragility 模式擴充 #3 halving-amplified subtype**（**Day 6、parity pattern 可重用於 shift-invert / Rayleigh 類 solver**）
-- [ ] 英文筆記 LaTeX/PDF（Session 7 選項 A）
-- [ ] `main_Heig.m` driver port（Session 7 選項 B）
-- [ ] 其他類別 port（Session 7 選項 C）
+- [x] **P1 — GitHub repo + push**（**Day 7、`chingsungliu/tensor-eigenvalue-toolbox` public repo、PAT + osxkeychain SOP**）
+- [x] **P2 — Streamlit theme + custom CSS**（**Day 7、numpy 風海軍藍 `#1B4F72` + serif headings + JetBrains Mono、`.streamlit/config.toml` + `styles.css`**）
+- [x] **P3 — About page**（**Day 7、`about.py` 128 行、研究者 bio + 4 paper placeholder + GitHub link、sidebar 底部 button 路由**）
+- [x] **P4 — Result visualization**（**Day 7、6 個新 plot：NNI min(x_i) / HNI vs NNI eigenvector overlap + λ trajectory / HONI innit bar / Multi hal bar / 多 run final λ bar、+ `_plot_grouped_bar` helper**）
+- [x] **P5 — Deploy to Streamlit Community Cloud**（**2026-04-28 上線：<https://csliu-toolbox.streamlit.app>**）
+- [ ] **Day 8 起：Level 2 收斂速度優化、Phase 1 Baseline & Profiling、Sub-step 1.1 明日詳細 prompt**
+- [ ] 英文筆記 LaTeX/PDF（原 Session 7 選項 A、Level 2 後可選）
+- [ ] `main_Heig.m` driver port（原 Session 7 選項 B、Level 2 後可選）
+- [ ] 其他類別 port（原 Session 7 選項 C、Level 2 後可選）
