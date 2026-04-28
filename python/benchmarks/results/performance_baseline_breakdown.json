@@ -1,0 +1,301 @@
+{
+  "timestamp": "2026-04-28T09:04:43",
+  "config": {
+    "n": 20,
+    "m": 3,
+    "seed": 42,
+    "tol": 1e-10,
+    "maxit": 200
+  },
+  "breakdown": {
+    "Multi": {
+      "multi.tensor_contract": {
+        "count": 6,
+        "total_ns": 163210,
+        "total_ms": 0.16321,
+        "mean_ns": 27201.666666666668,
+        "median_ns": 23625.5,
+        "min_ns": 22417,
+        "max_ns": 44000
+      },
+      "multi.residual_check": {
+        "count": 6,
+        "total_ns": 22376,
+        "total_ms": 0.022376,
+        "mean_ns": 3729.3333333333335,
+        "median_ns": 3583.5,
+        "min_ns": 3458,
+        "max_ns": 4209
+      },
+      "multi.linear_solve": {
+        "count": 5,
+        "total_ns": 4353917,
+        "total_ms": 4.353917,
+        "mean_ns": 870783.4,
+        "median_ns": 832250.0,
+        "min_ns": 812417,
+        "max_ns": 1037709
+      },
+      "multi.halving_search": {
+        "count": 5,
+        "total_ns": 21125,
+        "total_ms": 0.021125,
+        "mean_ns": 4225.0,
+        "median_ns": 4167.0,
+        "min_ns": 3667,
+        "max_ns": 5041
+      }
+    },
+    "HONI_exact": {
+      "honi.tensor_contract": {
+        "count": 1,
+        "total_ns": 23708,
+        "total_ms": 0.023708,
+        "mean_ns": 23708.0,
+        "median_ns": 23708.0,
+        "min_ns": 23708,
+        "max_ns": 23708
+      },
+      "multi.tensor_contract": {
+        "count": 415,
+        "total_ns": 6666005,
+        "total_ms": 6.666005,
+        "mean_ns": 16062.66265060241,
+        "median_ns": 15333.0,
+        "min_ns": 14250,
+        "max_ns": 25667
+      },
+      "multi.residual_check": {
+        "count": 415,
+        "total_ns": 1010328,
+        "total_ms": 1.010328,
+        "mean_ns": 2434.5253012048192,
+        "median_ns": 2292.0,
+        "min_ns": 2042,
+        "max_ns": 3583
+      },
+      "multi.linear_solve": {
+        "count": 46,
+        "total_ns": 36968374,
+        "total_ms": 36.968374,
+        "mean_ns": 803660.304347826,
+        "median_ns": 803750.5,
+        "min_ns": 775291,
+        "max_ns": 860875
+      },
+      "multi.halving_search": {
+        "count": 46,
+        "total_ns": 8895580,
+        "total_ms": 8.89558,
+        "mean_ns": 193382.1739130435,
+        "median_ns": 127958.0,
+        "min_ns": 3500,
+        "max_ns": 644000
+      },
+      "honi.inner_multi_call": {
+        "count": 4,
+        "total_ns": 48277291,
+        "total_ms": 48.277291,
+        "mean_ns": 12069322.75,
+        "median_ns": 13429541.5,
+        "min_ns": 5368583,
+        "max_ns": 16049625
+      },
+      "honi.rayleigh_extract": {
+        "count": 4,
+        "total_ns": 18498,
+        "total_ms": 0.018498,
+        "mean_ns": 4624.5,
+        "median_ns": 4624.5,
+        "min_ns": 4458,
+        "max_ns": 4791
+      },
+      "honi.lambda_update": {
+        "count": 4,
+        "total_ns": 5042,
+        "total_ms": 0.005042,
+        "mean_ns": 1260.5,
+        "median_ns": 1083.5,
+        "min_ns": 1000,
+        "max_ns": 1875
+      },
+      "honi.outer_iter": {
+        "count": 4,
+        "total_ns": 48557416,
+        "total_ms": 48.557416,
+        "mean_ns": 12139354.0,
+        "median_ns": 13497729.0,
+        "min_ns": 5444542,
+        "max_ns": 16117416
+      }
+    },
+    "HONI_inexact": {
+      "honi.tensor_contract": {
+        "count": 5,
+        "total_ns": 118708,
+        "total_ms": 0.118708,
+        "mean_ns": 23741.6,
+        "median_ns": 23791.0,
+        "min_ns": 21709,
+        "max_ns": 25917
+      },
+      "multi.tensor_contract": {
+        "count": 394,
+        "total_ns": 42793013,
+        "total_ms": 42.793013,
+        "mean_ns": 108611.70812182741,
+        "median_ns": 14834.0,
+        "min_ns": 14042,
+        "max_ns": 33861125
+      },
+      "multi.residual_check": {
+        "count": 394,
+        "total_ns": 1361408,
+        "total_ms": 1.361408,
+        "mean_ns": 3455.3502538071066,
+        "median_ns": 2334.0,
+        "min_ns": 2083,
+        "max_ns": 64458
+      },
+      "multi.linear_solve": {
+        "count": 41,
+        "total_ns": 39496791,
+        "total_ms": 39.496791,
+        "mean_ns": 963336.3658536585,
+        "median_ns": 795042.0,
+        "min_ns": 763167,
+        "max_ns": 3791166
+      },
+      "multi.halving_search": {
+        "count": 41,
+        "total_ns": 80295498,
+        "total_ms": 80.295498,
+        "mean_ns": 1958426.780487805,
+        "median_ns": 146708.0,
+        "min_ns": 3500,
+        "max_ns": 68118709
+      },
+      "honi.inner_multi_call": {
+        "count": 4,
+        "total_ns": 122458167,
+        "total_ms": 122.458167,
+        "mean_ns": 30614541.75,
+        "median_ns": 11475500.0,
+        "min_ns": 2709500,
+        "max_ns": 96797667
+      },
+      "honi.rayleigh_extract": {
+        "count": 4,
+        "total_ns": 103625,
+        "total_ms": 0.103625,
+        "mean_ns": 25906.25,
+        "median_ns": 25437.5,
+        "min_ns": 25000,
+        "max_ns": 27750
+      },
+      "honi.lambda_update": {
+        "count": 4,
+        "total_ns": 3418,
+        "total_ms": 0.003418,
+        "mean_ns": 854.5,
+        "median_ns": 750.5,
+        "min_ns": 667,
+        "max_ns": 1250
+      },
+      "honi.outer_iter": {
+        "count": 4,
+        "total_ns": 122837292,
+        "total_ms": 122.837292,
+        "mean_ns": 30709323.0,
+        "median_ns": 11567917.0,
+        "min_ns": 2803458,
+        "max_ns": 96898000
+      }
+    },
+    "NNI_spsolve": {
+      "nni.tensor_contract": {
+        "count": 17,
+        "total_ns": 761586,
+        "total_ms": 0.761586,
+        "mean_ns": 44799.17647058824,
+        "median_ns": 25041.0,
+        "min_ns": 21959,
+        "max_ns": 212833
+      },
+      "nni.linear_solve": {
+        "count": 16,
+        "total_ns": 53193124,
+        "total_ms": 53.193124,
+        "mean_ns": 3324570.25,
+        "median_ns": 983750.5,
+        "min_ns": 876500,
+        "max_ns": 19259208
+      },
+      "nni.rayleigh_quotient": {
+        "count": 16,
+        "total_ns": 163333,
+        "total_ms": 0.163333,
+        "mean_ns": 10208.3125,
+        "median_ns": 6395.5,
+        "min_ns": 5375,
+        "max_ns": 33250
+      },
+      "nni.bracket_update": {
+        "count": 16,
+        "total_ns": 11959,
+        "total_ms": 0.011959,
+        "mean_ns": 747.4375,
+        "median_ns": 583.0,
+        "min_ns": 458,
+        "max_ns": 2000
+      }
+    },
+    "NNI_ha": {
+      "nni.tensor_contract": {
+        "count": 43,
+        "total_ns": 1039874,
+        "total_ms": 1.039874,
+        "mean_ns": 24183.116279069767,
+        "median_ns": 22208.0,
+        "min_ns": 17917,
+        "max_ns": 51792
+      },
+      "nni.linear_solve": {
+        "count": 24,
+        "total_ns": 25196461,
+        "total_ms": 25.196461,
+        "mean_ns": 1049852.5416666667,
+        "median_ns": 932958.5,
+        "min_ns": 874125,
+        "max_ns": 1904000
+      },
+      "nni.rayleigh_quotient": {
+        "count": 42,
+        "total_ns": 255628,
+        "total_ms": 0.255628,
+        "mean_ns": 6086.380952380952,
+        "median_ns": 5417.0,
+        "min_ns": 4542,
+        "max_ns": 12625
+      },
+      "nni.halving_inner": {
+        "count": 24,
+        "total_ns": 601335,
+        "total_ms": 0.601335,
+        "mean_ns": 25055.625,
+        "median_ns": 32166.5,
+        "min_ns": 333,
+        "max_ns": 36250
+      },
+      "nni.bracket_update": {
+        "count": 24,
+        "total_ns": 11461,
+        "total_ms": 0.011461,
+        "mean_ns": 477.5416666666667,
+        "median_ns": 458.0,
+        "min_ns": 334,
+        "max_ns": 750
+      }
+    }
+  }
+}

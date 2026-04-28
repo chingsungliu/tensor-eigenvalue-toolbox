@@ -10,6 +10,7 @@
   `order='F'`，匹配 MATLAB 的欄優先儲存。
 """
 import warnings
+from contextlib import nullcontext
 
 import numpy as np
 from scipy.sparse import (
@@ -20,6 +21,23 @@ from scipy.sparse import (
     kron as sp_kron,
 )
 from scipy.sparse.linalg import gmres, norm as sparse_norm, spsolve
+
+# Optional profiling hook (Phase 1 Sub-step 1.2). When the benchmarks
+# package is unavailable (e.g. running tests from a cwd that does not
+# have ``python/`` on sys.path) we fall back to a permanent no-op stub
+# so the algorithms continue to import cleanly.
+try:
+    from benchmarks.profiling import get_profiler  # type: ignore
+except ImportError:  # pragma: no cover — only triggered by unusual cwd
+    class _NoOpProfiler:
+        _null = nullcontext()
+        def time(self, category):  # noqa: D401 — match real API
+            return self._null
+        def flag(self, name):
+            return None
+    _NOOP_PROFILER = _NoOpProfiler()
+    def get_profiler():
+        return _NOOP_PROFILER
 
 
 def tenpow(x, p, matlab_compat=False):
@@ -494,11 +512,14 @@ def multi(AA, b, m, tol, record_history=False, matlab_compat=False):
         ))
 
     nb = float(np.linalg.norm(b_raised))                        # line 17
-    temp = tpv(AA, u, m, matlab_compat=matlab_compat)           # line 18
+    _prof = get_profiler()
+    with _prof.time("multi.tensor_contract"):
+        temp = tpv(AA, u, m, matlab_compat=matlab_compat)       # line 18
 
     _BUF = 100
     res = np.full(_BUF, na + nb, dtype=np.float64)              # line 19
-    res[0] = np.linalg.norm(temp - b_raised)                    # line 20 (MATLAB res(1))
+    with _prof.time("multi.residual_check"):
+        res[0] = np.linalg.norm(temp - b_raised)                # line 20 (MATLAB res(1))
     hal = np.zeros(_BUF, dtype=np.float64)                      # line 21
     nit = 0                                                      # line 21: MATLAB `nit=1` → Python 0-based
 
@@ -517,31 +538,37 @@ def multi(AA, b, m, tol, record_history=False, matlab_compat=False):
         nit += 1                                                 # line 24
 
         # 1. Jacobian + 線性求解 (line 27-28)
-        M = (sp_Jaco_Ax(AA, u, m, matlab_compat=matlab_compat) / (m - 1)).tocsc()
-        v = spsolve(M, b_raised)
+        with _prof.time("multi.linear_solve"):
+            M = (sp_Jaco_Ax(AA, u, m, matlab_compat=matlab_compat) / (m - 1)).tocsc()
+            v = spsolve(M, b_raised)
 
         # 2. Newton step θ = 1 試算 (line 31-37)
         theta = 1.0
         u_old = u.copy()                                         # line 33 snapshot
         v_old = v.copy()
         u = (1 - theta / (m - 1)) * u_old + theta * v_old / (m - 1)    # line 34
-        temp = tpv(AA, u, m, matlab_compat=matlab_compat)        # line 35
-        res[nit] = np.linalg.norm(temp - b_raised)               # line 36
+        with _prof.time("multi.tensor_contract"):
+            temp = tpv(AA, u, m, matlab_compat=matlab_compat)    # line 35
+        with _prof.time("multi.residual_check"):
+            res[nit] = np.linalg.norm(temp - b_raised)           # line 36
         hit = 0                                                   # line 37
 
         # 3. 三等分 halving line search (line 39-50)
         #    OR 順序保持 MATLAB 寫法：先 res 比較、再 min(temp) < 0
-        while res[nit] - res[nit - 1] > 0 or np.min(temp) < 0:
-            theta /= 3                                           # line 40 (/3 NOT /2)
-            u = (1 - theta / (m - 1)) * u_old + theta * v_old / (m - 1)  # line 41 snapshot-based
-            temp = tpv(AA, u, m, matlab_compat=matlab_compat)    # line 42
-            res[nit] = np.linalg.norm(temp - b_raised)           # line 43-44
-            hit += 1                                              # line 45
-            if theta < tol_theta:                                 # line 46
-                print(
-                    "Can't find a suitible step length such that inner residual decrease!"
-                )
-                break
+        with _prof.time("multi.halving_search"):
+            while res[nit] - res[nit - 1] > 0 or np.min(temp) < 0:
+                theta /= 3                                       # line 40 (/3 NOT /2)
+                u = (1 - theta / (m - 1)) * u_old + theta * v_old / (m - 1)  # line 41 snapshot-based
+                with _prof.time("multi.tensor_contract"):
+                    temp = tpv(AA, u, m, matlab_compat=matlab_compat)  # line 42
+                with _prof.time("multi.residual_check"):
+                    res[nit] = np.linalg.norm(temp - b_raised)   # line 43-44
+                hit += 1                                          # line 45
+                if theta < tol_theta:                             # line 46
+                    print(
+                        "Can't find a suitible step length such that inner residual decrease!"
+                    )
+                    break
 
         hal[nit] = hit                                           # line 51
 
@@ -738,8 +765,10 @@ def honi(
         )
 
     # ---- 初始化 (HONI.m line 35-44) ----
+    _prof = get_profiler()
     x = initial_vector / np.linalg.norm(initial_vector)                 # line 35-36
-    temp = tpv(AA, x, m, matlab_compat=matlab_compat) / (x ** (m - 1))  # line 37
+    with _prof.time("honi.tensor_contract"):
+        temp = tpv(AA, x, m, matlab_compat=matlab_compat) / (x ** (m - 1))  # line 37
     lambda_U = float(np.max(temp))                                       # line 38
     II = sp_tendiag(np.ones(n), m, matlab_compat=matlab_compat)          # line 39
 
@@ -769,6 +798,7 @@ def honi(
 
     # ---- 外層 eigenvalue iteration (HONI.m line 46-79) ----
     while np.min(res) > tol and nit < _MAX_NIT:
+      with _prof.time("honi.outer_iter"):
         nit += 1                                                          # line 47
         nit_mat = nit + 1  # explicit MATLAB 1-based equivalent (Q5 checklist #3)
 
@@ -789,17 +819,24 @@ def honi(
             )                                                             # line 67
 
         # Call Multi (inner Newton solver)
-        if record_inner_history:
-            y, chit_py, hal_inn, inner_hist = multi(
-                AA_shifted, x, m, inner_tol,
-                record_history=True, matlab_compat=matlab_compat,
-            )
-        else:
-            y, chit_py, hal_inn = multi(
-                AA_shifted, x, m, inner_tol,
-                record_history=False, matlab_compat=matlab_compat,
-            )
-            inner_hist = None
+        with _prof.time("honi.inner_multi_call"):
+            if record_inner_history:
+                y, chit_py, hal_inn, inner_hist = multi(
+                    AA_shifted, x, m, inner_tol,
+                    record_history=True, matlab_compat=matlab_compat,
+                )
+            else:
+                y, chit_py, hal_inn = multi(
+                    AA_shifted, x, m, inner_tol,
+                    record_history=False, matlab_compat=matlab_compat,
+                )
+                inner_hist = None
+
+        # F1 detection signal: Multi inner Newton hit its iter cap (_BUF - 1 = 99)
+        # ⇒ the inner solver did not converge cleanly; HONI is operating on
+        # a trapped y rather than a true (λ_U·I − A)^{−1} x^{m−1}.
+        if _prof.enabled and chit_py >= 99:
+            _prof.flag("honi.inner_trap")
 
         # Q6 checklist #4: chit_mat = chit_py + 1 to match MATLAB's 1-based innit
         chit_mat = chit_py + 1
@@ -808,22 +845,39 @@ def honi(
         hal += hal_this_outer                                             # line 55/69
 
         # Branch-specific updates (Q1 + §四 checklist #6)
+        lambda_U_prev = lambda_U
         if linear_solver == "exact":
             # HONI.m line 58-61: ratio → lambda update → res → normalize
-            temp = x / y
-            min_temp = float(np.min(temp))
-            max_temp = float(np.max(temp))
-            lambda_U = lambda_U - min_temp ** (m - 1)                    # line 59
-            res[nit] = abs(max_temp ** (m - 1) - min_temp ** (m - 1)) / lambda_U  # line 60
+            with _prof.time("honi.rayleigh_extract"):
+                temp = x / y
+                min_temp = float(np.min(temp))
+                max_temp = float(np.max(temp))
+            with _prof.time("honi.lambda_update"):
+                lambda_U = lambda_U - min_temp ** (m - 1)                # line 59
+                res[nit] = abs(max_temp ** (m - 1) - min_temp ** (m - 1)) / lambda_U  # line 60
             x = y / np.linalg.norm(y)                                    # line 61
         else:  # "inexact"
             # HONI.m line 72-75: normalize → tpv on new x → lambda = max
             x = y / np.linalg.norm(y)                                    # line 72
-            temp = tpv(AA, x, m, matlab_compat=matlab_compat) / (x ** (m - 1))  # line 73
-            min_temp = float(np.min(temp))
-            max_temp = float(np.max(temp))
-            lambda_U = max_temp                                          # line 74
-            res[nit] = abs(max_temp - min_temp) / lambda_U               # line 75
+            with _prof.time("honi.rayleigh_extract"), \
+                 _prof.time("honi.tensor_contract"):
+                temp = tpv(AA, x, m, matlab_compat=matlab_compat) / (x ** (m - 1))  # line 73
+                min_temp = float(np.min(temp))
+                max_temp = float(np.max(temp))
+            with _prof.time("honi.lambda_update"):
+                lambda_U = max_temp                                      # line 74
+                res[nit] = abs(max_temp - min_temp) / lambda_U           # line 75
+
+        # F1 detection signal: after the trajectory has had a chance to settle
+        # (nit >= 3), an outer-iter step that moves λ_U by > 1% relative is
+        # anomalous. Q7_baseline iter 3→4 moves λ_U by ~10⁻⁵ relative; F1
+        # iter 4→5 moves by ~4% (the silent-failure jump). A fixed
+        # absolute threshold would either miss F1 or false-fire on early
+        # iters, so the gate uses relative jump + iteration index.
+        if _prof.enabled and nit >= 3 and abs(lambda_U_prev) > 0:
+            jump_rel = abs(lambda_U - lambda_U_prev) / abs(lambda_U_prev)
+            if jump_rel > 0.01:
+                _prof.flag("honi.lambda_nonmonotone")
 
         lambda_history[nit] = lambda_U
 
@@ -1120,8 +1174,10 @@ def nni(
         )
 
     # ---- 初始化 (NNI.m line 29-41) ----
+    _prof = get_profiler()
     x = initial_vector / np.linalg.norm(initial_vector)                          # line 31-32
-    temp = tpv(AA, x, m, matlab_compat=matlab_compat) / (x ** (m - 1))           # line 33
+    with _prof.time("nni.tensor_contract"):
+        temp = tpv(AA, x, m, matlab_compat=matlab_compat) / (x ** (m - 1))       # line 33
     lambda_U = float(np.max(temp))                                                # line 34
     lambda_L = float(np.min(temp))                                                # line 35
 
@@ -1155,40 +1211,41 @@ def nni(
         nit += 1                                                                  # line 43
 
         # Jacobian + shifted matrix (NNI.m line 44, 46)
-        B = sp_Jaco_Ax(AA, x, m, matlab_compat=matlab_compat)                     # line 44
-        D = sp_diags(x ** (m - 2))                                                # §四 checklist #2: sparse, not np.diag
-        M_shifted = B - (m - 1) * lambda_U * D                                    # line 46
+        with _prof.time("nni.linear_solve"):
+            B = sp_Jaco_Ax(AA, x, m, matlab_compat=matlab_compat)                 # line 44
+            D = sp_diags(x ** (m - 2))                                            # §四 checklist #2: sparse, not np.diag
+            M_shifted = B - (m - 1) * lambda_U * D                                # line 46
 
-        # RHS: x^(m-1) (NNI.m line 49)
-        w_rhs = x ** (m - 1)
+            # RHS: x^(m-1) (NNI.m line 49)
+            w_rhs = x ** (m - 1)
 
-        # Linear solve: y_raw = (-M_shifted) \ w_rhs  (note the MINUS sign, line 49)
-        if linear_solver == "spsolve":
-            y_raw = spsolve((-M_shifted).tocsc(), w_rhs)
-        else:  # "gmres"
-            y_raw, info = gmres(
-                -M_shifted, w_rhs,
-                rtol=opts["tol"],
-                atol=0.0,
-                restart=opts["restart"],
-                maxiter=opts["maxit"],
-                M=opts["M"],
-            )
-            if info < 0:
-                raise ValueError(
-                    f"gmres illegal input at outer iter {nit} (info={info})"
+            # Linear solve: y_raw = (-M_shifted) \ w_rhs  (note the MINUS sign, line 49)
+            if linear_solver == "spsolve":
+                y_raw = spsolve((-M_shifted).tocsc(), w_rhs)
+            else:  # "gmres"
+                y_raw, info = gmres(
+                    -M_shifted, w_rhs,
+                    rtol=opts["tol"],
+                    atol=0.0,
+                    restart=opts["restart"],
+                    maxiter=opts["maxit"],
+                    M=opts["M"],
                 )
-            if info > 0:
-                warnings.warn(
-                    f"gmres did not converge in {opts['maxit']} iters at "
-                    f"outer iter {nit} (info={info})",
-                    stacklevel=2,
-                )
-            if record_history:
-                gmres_info_history[nit] = info
+                if info < 0:
+                    raise ValueError(
+                        f"gmres illegal input at outer iter {nit} (info={info})"
+                    )
+                if info > 0:
+                    warnings.warn(
+                        f"gmres did not converge in {opts['maxit']} iters at "
+                        f"outer iter {nit} (info={info})",
+                        stacklevel=2,
+                    )
+                if record_history:
+                    gmres_info_history[nit] = info
 
-        # Normalize Newton direction (NNI.m line 56)
-        y = y_raw / np.linalg.norm(y_raw)
+            # Normalize Newton direction (NNI.m line 56)
+            y = y_raw / np.linalg.norm(y_raw)
 
         # step_length (NNI.m / NNI_ha.m line 148-187) — halving kwarg 切換兩分支
         # §四 checklist #3; §九 addendum (Phase 1) 詳述選項 A kwarg 設計
@@ -1197,9 +1254,11 @@ def nni(
             # --- canonical NNI.m: full step、無條件接受、hit≡0 (halving 在 MATLAB 端註解掉) ---
             x_new = (m - 2) * x + y
             x_new = x_new / np.linalg.norm(x_new)
-            temp = tpv(AA, x_new, m, matlab_compat=matlab_compat) / (x_new ** (m - 1))
-            lambda_U_new = float(np.max(temp))
-            lambda_L_new = float(np.min(temp))
+            with _prof.time("nni.tensor_contract"):
+                temp = tpv(AA, x_new, m, matlab_compat=matlab_compat) / (x_new ** (m - 1))
+            with _prof.time("nni.rayleigh_quotient"):
+                lambda_U_new = float(np.max(temp))
+                lambda_L_new = float(np.min(temp))
             hit = 0
         else:
             # --- NNI_ha.m: full-step overshoot (λ_U_new > λ_U + 1e-13) → halve theta ---
@@ -1209,26 +1268,31 @@ def nni(
             theta = 1.0
             x_new = (m - 2) * x + theta * y                                       # full step
             x_new = x_new / np.linalg.norm(x_new)
-            temp = tpv(AA, x_new, m, matlab_compat=matlab_compat) / (x_new ** (m - 1))
-            lambda_U_new = float(np.max(temp))
-            lambda_L_new = float(np.min(temp))
-            while lambda_U_new - lambda_U > 1e-13:
-                theta = theta / 2.0
-                x_new = (m - 2) * x + theta * y
-                x_new = x_new / np.linalg.norm(x_new)
+            with _prof.time("nni.tensor_contract"):
                 temp = tpv(AA, x_new, m, matlab_compat=matlab_compat) / (x_new ** (m - 1))
+            with _prof.time("nni.rayleigh_quotient"):
                 lambda_U_new = float(np.max(temp))
                 lambda_L_new = float(np.min(temp))
-                hit += 1
-                if theta < tol_theta:
-                    warnings.warn(
-                        f"NNI_ha halving break at outer iter {nit}: can't find a "
-                        f"suitable theta (theta={theta:.3e} < tol_theta={tol_theta:.0e}); "
-                        f"returning non-monotone lambda_U (see nni_hazard_analysis.md §九)",
-                        RuntimeWarning,
-                        stacklevel=2,
-                    )
-                    break
+            with _prof.time("nni.halving_inner"):
+                while lambda_U_new - lambda_U > 1e-13:
+                    theta = theta / 2.0
+                    x_new = (m - 2) * x + theta * y
+                    x_new = x_new / np.linalg.norm(x_new)
+                    with _prof.time("nni.tensor_contract"):
+                        temp = tpv(AA, x_new, m, matlab_compat=matlab_compat) / (x_new ** (m - 1))
+                    with _prof.time("nni.rayleigh_quotient"):
+                        lambda_U_new = float(np.max(temp))
+                        lambda_L_new = float(np.min(temp))
+                    hit += 1
+                    if theta < tol_theta:
+                        warnings.warn(
+                            f"NNI_ha halving break at outer iter {nit}: can't find a "
+                            f"suitable theta (theta={theta:.3e} < tol_theta={tol_theta:.0e}); "
+                            f"returning non-monotone lambda_U (see nni_hazard_analysis.md §九)",
+                            RuntimeWarning,
+                            stacklevel=2,
+                        )
+                        break
         chit += hit
 
         # Update state
@@ -1237,7 +1301,8 @@ def nni(
         lambda_L = lambda_L_new
 
         # Residual (NNI.m line 63)
-        res[nit] = (lambda_U - lambda_L) / lambda_U
+        with _prof.time("nni.bracket_update"):
+            res[nit] = (lambda_U - lambda_L) / lambda_U
 
         # History tracking
         lambda_U_history[nit] = lambda_U
