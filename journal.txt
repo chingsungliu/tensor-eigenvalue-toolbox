@@ -107,3 +107,50 @@ Memory 寫入: 無新 memory (P1-P5 都是工程實作 / 部署、
 
 下一步: Day 8 起 Level 2 (收斂速度優化)、Phase 1 Baseline & Profiling
         Sub-step 1.1 明日詳細 prompt
+
+
+Day 8 (2026-04-28): Massive day, 4 commits.
+-------------------------------------------
+
+Phase 0 (commit 7b6d40b): NNI naming corrections (Newton-Noda
+Iteration), 6 academic-English descriptions, 4 real paper
+citations on About page.
+
+Phase 1 (commit e57726b): Quantitative baseline.
+- 5-case x 4-algo x 3-run benchmark suite
+- HONI_exact silent-failure root cause discovered (75% trap rate
+  on n=50 random M-tensors)
+- 12 timing instrumentation points + 2 detection flags
+- Performance baseline report (481 lines, sec 1-6)
+- F-1.2.3 reversal methodology lesson
+
+Phase 2 Tier 1+2 (commit 526a6bd): Correctness fixes.
+- Cold-start spsolve mitigation (ratio 4.9x -> 1.2x)
+- NNI canonical assertion -> graceful halving fallback
+- HONI silent-failure auto-detection + NNI fallback
+- Multi-restart spectrum: 5/20 -> 20/20 correct
+- Demo went from 75% wrong to 100% correct on n=50
+
+Sub-step 2.5 (commit 23abcd8): Deploy infrastructure.
+- demo_v0.py sidebar shows Build SHA from .git/HEAD
+- scripts/check_deploy.py compares local vs origin SHA
+- README Deployment workflow section
+- Confirmed Streamlit Cloud free tier preserves .git/
+  (R1 assumption holds, no Fallback B needed)
+- Solves "Day 8 saw 2 cases of webhook stale" problem
+
+Memory state: 12 fragility memories.
+Demo: csliu-toolbox.streamlit.app stable, sidebar shows current SHA.
+Parity: 4 MATLAB<->Python tests + profiling parity all bit-identical
+throughout.
+
+Day 9 entry points (pick one):
+- Sub-step 2.6: Demo UI warning capture (capture RuntimeWarnings
+  from algo and display via st.warning) - completes Tier 1 A
+  user-facing communication
+- Sub-step 2.7: Multi internal assert graceful fallback
+  (Q7_small HONI_inexact remaining crash)
+- Tier 3 performance optimization (after Tier 1 A observation period)
+- Different direction (paper writing, NLS/NCP extension, etc.)
+
+User to decide Day 9 direction next session.
