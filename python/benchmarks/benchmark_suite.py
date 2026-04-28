@@ -105,6 +105,29 @@ def run_nni(AA, vec, m, tol):
     }
 
 
+def run_nni_gmres(AA, vec, m, tol):
+    """NNI with linear_solver='gmres' (Sub-step 3.1 measurement variant).
+
+    gmres_opts: tol=1e-10, restart=20, maxit=2000, M=None (no precond).
+    The 2000-iteration cap is intentionally generous — Sub-step 3.1 wants
+    to observe whether gmres ever non-converges within a reasonable budget,
+    not whether it can be tuned to be fast.
+    """
+    lam_U, x, nit, lam_L, outer_res, _lam_hist = nni(
+        AA, m, tol,
+        linear_solver="gmres",
+        gmres_opts={"tol": 1e-10, "restart": 20, "maxit": 2000, "M": None},
+        maxit=200, initial_vector=vec,
+    )
+    return {
+        "iteration_count": int(nit),
+        "inner_iteration_count": None,
+        "final_residual": float(outer_res[-1]),
+        "final_lambda": float(lam_U),
+        "lambda_lower": float(lam_L),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Benchmark harness
 # ---------------------------------------------------------------------------
@@ -198,6 +221,7 @@ def main(tol: float = 1e-10, n_runs: int = 3):
             ("HONI_exact",   lambda: run_honi(AA, vec, case["m"], tol, "exact")),
             ("HONI_inexact", lambda: run_honi(AA, vec, case["m"], tol, "inexact")),
             ("NNI_spsolve",  lambda: run_nni(AA, vec, case["m"], tol)),
+            ("NNI_gmres",    lambda: run_nni_gmres(AA, vec, case["m"], tol)),
         ]
         for algo, runner in runners:
             print(f"    {algo:<13s} ...", end=" ", flush=True)

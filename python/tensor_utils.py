@@ -403,29 +403,73 @@ def sp_Jaco_Ax(AA, x, m, matlab_compat=False):
     if p == 0:
         return csr_matrix((n, n), dtype=x.dtype)
 
-    # 內部統一 sparse CSR 做運算，對應 MATLAB 的 `dense*sparse = sparse` 行為
-    AA_sp = AA.tocsr() if issparse(AA) else csr_matrix(AA)
-    I = sp_eye(n, format="csr")
+    # 統一 CSR 形式做運算 (sparse 直接用，dense 先轉 CSR)
+    AA_csr = AA.tocsr() if issparse(AA) else csr_matrix(AA)
 
-    J = csr_matrix((n, n), dtype=x.dtype)
-    for i in range(1, p + 1):
-        # i 保留 MATLAB 1-based 迴圈範圍，讓 `i - 1` 和 `p - i` 這兩個
-        # exponent expression 跟 MATLAB 原版一字不差、好審校。
-        left = tenpow(x, i - 1, matlab_compat=matlab_compat).reshape(-1, 1)  # (n^(i-1), 1)
-        right = tenpow(x, p - i, matlab_compat=matlab_compat).reshape(-1, 1)  # (n^(p-i), 1)
+    # m=2 (p=1) fast path: F(x) = AA·x → Jacobian == AA itself.
+    # 跳過下面的 vectorized 構造（會多花~50us、result 一樣）。
+    if p == 1:
+        return AA_csr
 
-        # kron(I (n,n), right (n^(p-i), 1)) → sparse (n^(p-i+1), n)
-        inner = sp_kron(I, right, format="csr")
+    # ----------------------------------------------------------------------
+    # Sub-step 3.3 (A4) vectorized CSR construction. Replaces the previous
+    # p-iteration sp_kron loop. Mathematically identical (see derivation in
+    # docstring); the implementation bypasses scipy.sparse.kron's per-call
+    # instantiation overhead by assembling the COO triples directly from
+    # AA's CSR storage.
+    #
+    # Derivation. For column-major decomposition c = j_0 + j_1·n + j_2·n² +
+    # ... + j_{p-1}·n^(p-1), each AA nonzero (i, c, val) corresponds to
+    # the term  val · x_{j_0} · x_{j_1} · ... · x_{j_{p-1}}  in F(x)_i.
+    # Differentiating w.r.t. x_l gives the chain-rule sum
+    #     ∂F_i/∂x_l = Σ_a Σ_{c with j_a = l} val · Π_{b≠a} x_{j_b}.
+    # Therefore each AA nonzero contributes exactly p entries to J: one per
+    # axis a, at position (i, j_a) with weight  val · Π_{b≠a} x_{j_b}.
+    # Duplicate (i, j_a) pairs from different AA columns sum naturally
+    # under csr_matrix's COO-style constructor, so no explicit accumulation
+    # loop is needed.
+    # ----------------------------------------------------------------------
 
-        # kron(left (n^(i-1), 1), inner (n^(p-i+1), n)) → sparse (n^p, n)
-        outer = sp_kron(left, inner, format="csr")
+    indptr = AA_csr.indptr
+    indices = AA_csr.indices
+    data = np.asarray(AA_csr.data, dtype=np.float64)
 
-        # AA_sp (n, n^p) @ outer (n^p, n) → sparse (n, n)
-        term = AA_sp @ outer
+    # Row index per nonzero, broadcast from indptr (constant across NNI iter,
+    # candidate for caching in a future Sub-step 3.4 — not done here).
+    i_rows = np.repeat(np.arange(n), np.diff(indptr))  # (nnz,)
 
-        J = J + term
+    # Column-major decompose: js[a][k] = a-th axis index of AA's k-th nnz.
+    # Loop runs p times in Python; each step is a single numpy modulo/divide
+    # on an (nnz,) array.
+    js = []
+    remaining = indices
+    for _a in range(p):
+        js.append(remaining % n)
+        remaining = remaining // n
 
-    return J
+    # For each axis a, build (i_rows, js[a], data · Π_{b≠a} x[js[b]]).
+    # Outer Python loop is p iterations; inner is also p (small constant).
+    x = x.astype(np.float64, copy=False)
+    rows_per_axis = []
+    cols_per_axis = []
+    data_per_axis = []
+    for a in range(p):
+        weight = data.copy()
+        for b in range(p):
+            if b != a:
+                weight = weight * x[js[b]]
+        rows_per_axis.append(i_rows)
+        cols_per_axis.append(js[a])
+        data_per_axis.append(weight)
+
+    all_rows = np.concatenate(rows_per_axis)
+    all_cols = np.concatenate(cols_per_axis)
+    all_data = np.concatenate(data_per_axis)
+
+    return csr_matrix(
+        (all_data, (all_rows, all_cols)),
+        shape=(n, n),
+    )
 
 
 def multi(AA, b, m, tol, record_history=False, matlab_compat=False, *, graceful=False):
@@ -1401,41 +1445,53 @@ def nni(
         nit += 1                                                                  # line 43
 
         # Jacobian + shifted matrix (NNI.m line 44, 46)
+        # Sub-step 3.2: nni.linear_solve is split into six inclusive
+        # sub-categories so we can see which step inside this block
+        # actually dominates wall (Phase 1 §3 lumped them as one).
+        # Parent `nni.linear_solve` still wraps the whole region for
+        # backwards compatibility with §3 / §8 reports.
         with _prof.time("nni.linear_solve"):
-            B = sp_Jaco_Ax(AA, x, m, matlab_compat=matlab_compat)                 # line 44
-            D = sp_diags(x ** (m - 2))                                            # §四 checklist #2: sparse, not np.diag
-            M_shifted = B - (m - 1) * lambda_U * D                                # line 46
-
-            # RHS: x^(m-1) (NNI.m line 49)
-            w_rhs = x ** (m - 1)
+            with _prof.time("nni.linear_solve.jacobian_build"):
+                B = sp_Jaco_Ax(AA, x, m, matlab_compat=matlab_compat)             # line 44
+            with _prof.time("nni.linear_solve.diag_construct"):
+                D = sp_diags(x ** (m - 2))                                        # §四 checklist #2: sparse, not np.diag
+            with _prof.time("nni.linear_solve.shifted_assemble"):
+                M_shifted = B - (m - 1) * lambda_U * D                            # line 46
+                # RHS: x^(m-1) (NNI.m line 49)
+                w_rhs = x ** (m - 1)
 
             # Linear solve: y_raw = (-M_shifted) \ w_rhs  (note the MINUS sign, line 49)
             if linear_solver == "spsolve":
-                y_raw = spsolve((-M_shifted).tocsc(), w_rhs)
+                with _prof.time("nni.linear_solve.tocsc"):
+                    M_csc = (-M_shifted).tocsc()
+                with _prof.time("nni.linear_solve.spsolve_call"):
+                    y_raw = spsolve(M_csc, w_rhs)
             else:  # "gmres"
-                y_raw, info = gmres(
-                    -M_shifted, w_rhs,
-                    rtol=opts["tol"],
-                    atol=0.0,
-                    restart=opts["restart"],
-                    maxiter=opts["maxit"],
-                    M=opts["M"],
-                )
-                if info < 0:
-                    raise ValueError(
-                        f"gmres illegal input at outer iter {nit} (info={info})"
+                with _prof.time("nni.linear_solve.spsolve_call"):
+                    y_raw, info = gmres(
+                        -M_shifted, w_rhs,
+                        rtol=opts["tol"],
+                        atol=0.0,
+                        restart=opts["restart"],
+                        maxiter=opts["maxit"],
+                        M=opts["M"],
                     )
-                if info > 0:
-                    warnings.warn(
-                        f"gmres did not converge in {opts['maxit']} iters at "
-                        f"outer iter {nit} (info={info})",
-                        stacklevel=2,
-                    )
-                if record_history:
-                    gmres_info_history[nit] = info
+                    if info < 0:
+                        raise ValueError(
+                            f"gmres illegal input at outer iter {nit} (info={info})"
+                        )
+                    if info > 0:
+                        warnings.warn(
+                            f"gmres did not converge in {opts['maxit']} iters at "
+                            f"outer iter {nit} (info={info})",
+                            stacklevel=2,
+                        )
+                    if record_history:
+                        gmres_info_history[nit] = info
 
-            # Normalize Newton direction (NNI.m line 56)
-            y = y_raw / np.linalg.norm(y_raw)
+            with _prof.time("nni.linear_solve.normalize"):
+                # Normalize Newton direction (NNI.m line 56)
+                y = y_raw / np.linalg.norm(y_raw)
 
         # step_length (NNI.m / NNI_ha.m line 148-187) — halving kwarg 切換兩分支
         # §四 checklist #3; §九 addendum (Phase 1) 詳述選項 A kwarg 設計
