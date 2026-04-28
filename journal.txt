@@ -154,3 +154,47 @@ Day 9 entry points (pick one):
 - Different direction (paper writing, NLS/NCP extension, etc.)
 
 User to decide Day 9 direction next session.
+
+
+Day 9 (2026-04-29): Tier 1 user-facing completion. 1 commit.
+------------------------------------------------------------
+
+Sub-step 2.6 (Demo UI warning capture): algorithms.py adds
+_capture_algorithm_warnings() context manager and _render_warnings()
+helper with dedup. 6 renderers wrap algorithm calls in
+warnings.catch_warnings, stash captured records in session_state,
+display via st.warning at output time. Dedup collapses identical
+messages with "(this warning fired N times)" suffix.
+
+Sub-step 2.7 (c) (Multi internal assert graceful fallback):
+multi() gains keyword-only graceful kwarg (default False, parity safe).
+When graceful=True, line 598 residual upper-bound assert becomes
+RuntimeWarning + best-effort u return. HONI passes graceful=True at
+both inner multi() call sites.
+
+Sub-step 2.7 (d.1) (HONI inexact graceful fallback): mirrors 2.3 for
+inexact branch. When HONI's residual upper-bound assert (line 1056)
+trips on linear_solver="inexact", warn and re-solve via NNI canonical
+through existing _honi_fallback_to_nni helper.
+
+Result: 20/20 benchmark grid passes for first time. Q7_small
+HONI_inexact: crash -> success via stacked fallback chain. Demo on
+csliu-toolbox.streamlit.app shows complete fallback narrative:
+HONI silent failure detection -> NNI canonical fallback (and chained
+2.2 -> NNI_ha if needed). Sidebar shows build SHA b25d408.
+
+Commit: b25d408. Streamlit Cloud rebuild after manual reboot
+(module cache stale issue observed - sidebar SHA matched but Python
+sys.modules held old tensor_utils). Documented as Day 10 README
+update candidate.
+
+Memory state: 12 fragility memories.
+Parity: 4 MATLAB<->Python tests + profiling parity all bit-identical.
+
+Day 10 entry options (user to decide):
+- Sub-step 2.8: README Deployment workflow update with module cache
+  stale failure mode (Day 9 observed) + sidebar SHA caveat
+- Tier 3 performance: Inner-Multi linear_solve speedup (Candidate C)
+  or Multi halving cap shrinking inside HONI inexact (Candidate B)
+- Different direction: paper writing, NLS/NCP extension, productize,
+  etc.
