@@ -41,17 +41,17 @@
   ],
   "results": [
     {
-      "wall_clock_median_s": 0.020441374999999984,
+      "wall_clock_median_s": 0.010354666000000012,
       "wall_clock_all_runs_s": [
-        0.017589624999999998,
-        0.045572042000000035,
-        0.020441374999999984
+        0.010796042000000006,
+        0.010354666000000012,
+        0.01029475000000002
       ],
-      "peak_memory_median_mb": 0.05455493927001953,
+      "peak_memory_median_mb": 0.05439281463623047,
       "peak_memory_all_runs_mb": [
-        0.0954437255859375,
-        0.05455493927001953,
-        0.05381202697753906
+        0.09010505676269531,
+        0.05439281463623047,
+        0.05381011962890625
       ],
       "halving_warning_count_median": 0,
       "halving_warning_count_all_runs": [
@@ -73,15 +73,15 @@
       "tol": 1e-10
     },
     {
-      "wall_clock_median_s": 0.129283959,
+      "wall_clock_median_s": 0.11779445799999999,
       "wall_clock_all_runs_s": [
-        0.14702187500000002,
-        0.11705070800000006,
-        0.129283959
+        0.14968475000000003,
+        0.116153,
+        0.11779445799999999
       ],
       "peak_memory_median_mb": 0.0670156478881836,
       "peak_memory_all_runs_mb": [
-        0.12147712707519531,
+        0.1219940185546875,
         0.0670156478881836,
         0.0670156478881836
       ],
@@ -105,11 +105,11 @@
       "tol": 1e-10
     },
     {
-      "wall_clock_median_s": 0.10432775000000016,
+      "wall_clock_median_s": 0.1069416660000001,
       "wall_clock_all_runs_s": [
-        0.10771233299999994,
-        0.09969766600000007,
-        0.10432775000000016
+        0.10720745800000009,
+        0.10596654100000003,
+        0.1069416660000001
       ],
       "peak_memory_median_mb": 0.0670156478881836,
       "peak_memory_all_runs_mb": [
@@ -137,17 +137,17 @@
       "tol": 1e-10
     },
     {
-      "wall_clock_median_s": 0.04198504200000008,
+      "wall_clock_median_s": 0.039097665999999975,
       "wall_clock_all_runs_s": [
-        0.04198504200000008,
-        0.03464091700000016,
-        0.04777466699999988
+        0.03918325,
+        0.038084833000000096,
+        0.039097665999999975
       ],
-      "peak_memory_median_mb": 0.04772663116455078,
+      "peak_memory_median_mb": 0.04830455780029297,
       "peak_memory_all_runs_mb": [
-        0.0630950927734375,
-        0.04772663116455078,
-        0.04752063751220703
+        0.062186241149902344,
+        0.04830455780029297,
+        0.04751873016357422
       ],
       "halving_warning_count_median": 0,
       "halving_warning_count_all_runs": [
@@ -169,17 +169,17 @@
       "tol": 1e-10
     },
     {
-      "wall_clock_median_s": 0.01154662499999981,
+      "wall_clock_median_s": 0.01175241700000007,
       "wall_clock_all_runs_s": [
-        0.011328541999999997,
-        0.01154662499999981,
-        0.014849958999999968
+        0.011710082999999871,
+        0.012500208000000068,
+        0.01175241700000007
       ],
-      "peak_memory_median_mb": 0.19435691833496094,
+      "peak_memory_median_mb": 0.19435501098632812,
       "peak_memory_all_runs_mb": [
-        0.1947917938232422,
-        0.19435691833496094,
-        0.1943340301513672
+        0.19478988647460938,
+        0.19435501098632812,
+        0.19433212280273438
       ],
       "halving_warning_count_median": 0,
       "halving_warning_count_all_runs": [
@@ -201,11 +201,11 @@
       "tol": 1e-10
     },
     {
-      "wall_clock_median_s": 0.8986791250000001,
+      "wall_clock_median_s": 0.43984137499999987,
       "wall_clock_all_runs_s": [
-        0.906560416,
-        0.8790546250000002,
-        0.8986791250000001
+        0.43930099999999994,
+        0.4409967920000002,
+        0.43984137499999987
       ],
       "peak_memory_median_mb": 0.9614858627319336,
       "peak_memory_all_runs_mb": [
@@ -213,17 +213,17 @@
         0.9614858627319336,
         0.9614858627319336
       ],
-      "halving_warning_count_median": 99,
+      "halving_warning_count_median": 0,
       "halving_warning_count_all_runs": [
-        99,
-        99,
-        99
+        0,
+        0,
+        0
       ],
       "failure": null,
-      "iteration_count": 6,
-      "inner_iteration_count": 233,
-      "final_residual": 1.8698031976043228e-14,
-      "final_lambda": 9.33398015869727,
+      "iteration_count": 13,
+      "inner_iteration_count": 0,
+      "final_residual": 1.6514614246110341e-15,
+      "final_lambda": 10.756272068653573,
       "lambda_lower": null,
       "case": "Q7_large",
       "algorithm": "HONI_exact",
@@ -233,11 +233,11 @@
       "tol": 1e-10
     },
     {
-      "wall_clock_median_s": 26.405214666999996,
+      "wall_clock_median_s": 23.950665833000002,
       "wall_clock_all_runs_s": [
-        26.525937666999997,
-        26.405214666999996,
-        26.246692874999994
+        23.950665833000002,
+        24.1307255,
+        23.893630291
       ],
       "peak_memory_median_mb": 0.9614858627319336,
       "peak_memory_all_runs_mb": [
@@ -265,17 +265,17 @@
       "tol": 1e-10
     },
     {
-      "wall_clock_median_s": 0.03535254200001248,
+      "wall_clock_median_s": 0.035089708000000996,
       "wall_clock_all_runs_s": [
-        0.033541999999997074,
-        0.03535254200001248,
-        0.04010195799999394
+        0.03628287500001193,
+        0.03355762500000026,
+        0.035089708000000996
       ],
-      "peak_memory_median_mb": 0.23572826385498047,
+      "peak_memory_median_mb": 0.23568058013916016,
       "peak_memory_all_runs_mb": [
-        0.23575878143310547,
-        0.23572826385498047,
-        0.23568248748779297
+        0.2356576919555664,
+        0.23572635650634766,
+        0.23568058013916016
       ],
       "halving_warning_count_median": 0,
       "halving_warning_count_all_runs": [
@@ -297,17 +297,17 @@
       "tol": 1e-10
     },
     {
-      "wall_clock_median_s": 0.011149415999994972,
+      "wall_clock_median_s": 0.010338042000000769,
       "wall_clock_all_runs_s": [
-        0.010771000000005415,
-        0.011149415999994972,
-        0.012935583000000861
+        0.01060466599999188,
+        0.010338042000000769,
+        0.010118290999997726
       ],
-      "peak_memory_median_mb": 0.019220352172851562,
+      "peak_memory_median_mb": 0.01921844482421875,
       "peak_memory_all_runs_mb": [
-        0.019685745239257812,
-        0.019220352172851562,
-        0.019197463989257812
+        0.01952362060546875,
+        0.01921844482421875,
+        0.019195556640625
       ],
       "halving_warning_count_median": 0,
       "halving_warning_count_all_runs": [
@@ -329,29 +329,29 @@
       "tol": 1e-10
     },
     {
-      "wall_clock_median_s": 1.2405764579999925,
+      "wall_clock_median_s": 1.7069006669999993,
       "wall_clock_all_runs_s": [
-        1.2265306249999952,
-        1.2405764579999925,
-        1.2417936249999997
+        1.7132089589999993,
+        1.7069006669999993,
+        1.7019770419999958
       ],
-      "peak_memory_median_mb": 0.031154632568359375,
+      "peak_memory_median_mb": 0.047425270080566406,
       "peak_memory_all_runs_mb": [
-        0.031406402587890625,
-        0.031154632568359375,
-        0.031108856201171875
+        0.22124767303466797,
+        0.04548835754394531,
+        0.047425270080566406
       ],
-      "halving_warning_count_median": 294,
+      "halving_warning_count_median": 195,
       "halving_warning_count_all_runs": [
-        294,
-        294,
-        294
+        195,
+        195,
+        195
       ],
       "failure": null,
-      "iteration_count": 6,
-      "inner_iteration_count": 351,
-      "final_residual": 2.2547768176696777e-12,
-      "final_lambda": 8.756218325820333,
+      "iteration_count": 199,
+      "inner_iteration_count": 0,
+      "final_residual": 0.7359044656680795,
+      "final_lambda": 10.75622351636756,
       "lambda_lower": null,
       "case": "Q7_small",
       "algorithm": "HONI_exact",
@@ -361,13 +361,13 @@
       "tol": 1e-10
     },
     {
-      "wall_clock_median_s": 0.791603875000007,
+      "wall_clock_median_s": 0.7358740420000061,
       "wall_clock_all_runs_s": [
-        0.791603875000007
+        0.7358740420000061
       ],
-      "peak_memory_median_mb": 0.0284271240234375,
+      "peak_memory_median_mb": 0.028318405151367188,
       "peak_memory_all_runs_mb": [
-        0.0284271240234375
+        0.028318405151367188
       ],
       "halving_warning_count_median": 99,
       "halving_warning_count_all_runs": [
@@ -390,27 +390,30 @@
       "tol": 1e-10
     },
     {
-      "wall_clock_median_s": 0.47717770799999926,
+      "wall_clock_median_s": 0.9045975829999975,
       "wall_clock_all_runs_s": [
-        0.47717770799999926
+        0.9043936669999937,
+        0.9045975829999975,
+        0.9084685830000012
       ],
-      "peak_memory_median_mb": 0.02454376220703125,
+      "peak_memory_median_mb": 0.03378772735595703,
       "peak_memory_all_runs_mb": [
-        0.02454376220703125
+        0.03399085998535156,
+        0.03378772735595703,
+        0.03371906280517578
       ],
       "halving_warning_count_median": 0,
       "halving_warning_count_all_runs": [
+        0,
+        0,
         0
       ],
-      "failure": {
-        "exception_type": "AssertionError",
-        "message": "res upper-bound violation: max res[:200] = 2.023117e+05, pre-fill was 1.0 (should hold for clean M-tensor with lambda_L >= 0)"
-      },
-      "iteration_count": null,
+      "failure": null,
+      "iteration_count": 199,
       "inner_iteration_count": null,
-      "final_residual": null,
-      "final_lambda": null,
-      "lambda_lower": null,
+      "final_residual": 0.7359044656680795,
+      "final_lambda": 10.75622351636756,
+      "lambda_lower": 2.8406705969486588,
       "case": "Q7_small",
       "algorithm": "NNI_spsolve",
       "n": 10,
@@ -419,17 +422,17 @@
       "tol": 1e-10
     },
     {
-      "wall_clock_median_s": 0.010887792000005447,
+      "wall_clock_median_s": 0.010268666999991183,
       "wall_clock_all_runs_s": [
-        0.012568500000000427,
-        0.00986224999999763,
-        0.010887792000005447
+        0.010240874999993821,
+        0.010407166999996775,
+        0.010268666999991183
       ],
-      "peak_memory_median_mb": 0.0394287109375,
+      "peak_memory_median_mb": 0.03942680358886719,
       "peak_memory_all_runs_mb": [
-        0.03997802734375,
-        0.0394287109375,
-        0.03940582275390625
+        0.03973197937011719,
+        0.03942680358886719,
+        0.03940391540527344
       ],
       "halving_warning_count_median": 0,
       "halving_warning_count_all_runs": [
@@ -451,11 +454,11 @@
       "tol": 1e-10
     },
     {
-      "wall_clock_median_s": 0.16850912499999993,
+      "wall_clock_median_s": 0.15067012500000487,
       "wall_clock_all_runs_s": [
-        0.16850912499999993,
-        0.15516370800000345,
-        0.17196179100000109
+        0.15067012500000487,
+        0.153419999999997,
+        0.15037979100000598
       ],
       "peak_memory_median_mb": 0.0670156478881836,
       "peak_memory_all_runs_mb": [
@@ -483,11 +486,11 @@
       "tol": 1e-10
     },
     {
-      "wall_clock_median_s": 0.14665562500000817,
+      "wall_clock_median_s": 0.1357107500000012,
       "wall_clock_all_runs_s": [
-        0.14843808300000205,
-        0.14665562500000817,
-        0.14279837500001236
+        0.13506062499999416,
+        0.13863595800000894,
+        0.1357107500000012
       ],
       "peak_memory_median_mb": 0.0670156478881836,
       "peak_memory_all_runs_mb": [
@@ -515,17 +518,17 @@
       "tol": 1e-10
     },
     {
-      "wall_clock_median_s": 0.03626858299999469,
+      "wall_clock_median_s": 0.03593529199999068,
       "wall_clock_all_runs_s": [
-        0.03626858299999469,
-        0.03971308300000942,
-        0.034839125000004856
+        0.0352132499999982,
+        0.03593529199999068,
+        0.036225207999990516
       ],
-      "peak_memory_median_mb": 0.04757404327392578,
+      "peak_memory_median_mb": 0.04752635955810547,
       "peak_memory_all_runs_mb": [
-        0.04757404327392578,
-        0.04770374298095703,
-        0.04749774932861328
+        0.04752635955810547,
+        0.04754161834716797,
+        0.04749584197998047
       ],
       "halving_warning_count_median": 0,
       "halving_warning_count_all_runs": [
@@ -547,17 +550,17 @@
       "tol": 1e-10
     },
     {
-      "wall_clock_median_s": 0.00998570799998788,
+      "wall_clock_median_s": 0.010897042000010515,
       "wall_clock_all_runs_s": [
-        0.010468915999993555,
-        0.00998570799998788,
-        0.009878249999999866
+        0.010769166999992308,
+        0.010897042000010515,
+        0.010917792000000759
       ],
-      "peak_memory_median_mb": 0.0394287109375,
+      "peak_memory_median_mb": 0.03942680358886719,
       "peak_memory_all_runs_mb": [
-        0.03989410400390625,
-        0.0394287109375,
-        0.03940582275390625
+        0.03989219665527344,
+        0.03942680358886719,
+        0.03940391540527344
       ],
       "halving_warning_count_median": 0,
       "halving_warning_count_all_runs": [
@@ -579,11 +582,11 @@
       "tol": 1e-10
     },
     {
-      "wall_clock_median_s": 0.24270562500001347,
+      "wall_clock_median_s": 0.22215545800000314,
       "wall_clock_all_runs_s": [
-        0.24270562500001347,
-        0.23918350000000999,
-        0.24686837500000536
+        0.22620612500000448,
+        0.22152662499999565,
+        0.22215545800000314
       ],
       "peak_memory_median_mb": 0.0670156478881836,
       "peak_memory_all_runs_mb": [
@@ -611,11 +614,11 @@
       "tol": 1e-10
     },
     {
-      "wall_clock_median_s": 0.405200624999992,
+      "wall_clock_median_s": 0.3761077920000133,
       "wall_clock_all_runs_s": [
-        0.41081462500000043,
-        0.39660524999999325,
-        0.405200624999992
+        0.3771145409999974,
+        0.3761077920000133,
+        0.37357874999999297
       ],
       "peak_memory_median_mb": 0.0670156478881836,
       "peak_memory_all_runs_mb": [
@@ -643,17 +646,17 @@
       "tol": 1e-10
     },
     {
-      "wall_clock_median_s": 0.06562004200000615,
+      "wall_clock_median_s": 0.055968458999998916,
       "wall_clock_all_runs_s": [
-        0.06787124999999605,
-        0.06562004200000615,
-        0.05745004199999926
+        0.055968458999998916,
+        0.057016541999999504,
+        0.05545804199999793
       ],
-      "peak_memory_median_mb": 0.047646522521972656,
+      "peak_memory_median_mb": 0.047629356384277344,
       "peak_memory_all_runs_mb": [
-        0.05055809020996094,
-        0.047646522521972656,
-        0.047600746154785156
+        0.047629356384277344,
+        0.047644615173339844,
+        0.047598838806152344
       ],
       "halving_warning_count_median": 0,
       "halving_warning_count_all_runs": [

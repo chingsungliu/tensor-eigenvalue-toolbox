@@ -503,3 +503,161 @@ B's halving cap shrink may reduce the very signals A relies on.
   produces a tensor that violates the algorithm's `lambda_L >= 0`
   assumption. A more disciplined Q7 builder that rejects bad seeds
   would simplify the picture.
+
+---
+
+## §7 Phase 2 outcomes (Sub-steps 2.1, 2.2, 2.3)
+
+Phase 2 Tier 1 + 2 prioritised correctness over performance. Three
+sub-steps shipped: cold-start mitigation (Tier 2 D), graceful fallback
+for the NNI canonical assertion (Tier 1 E), and silent-failure
+auto-detection for HONI exact (Tier 1 A).
+
+### §7.1 Sub-step 2.1 — Cold-start spsolve mitigation (Tier 2 D)
+
+| | NNI Q7_baseline `linear_solve` |
+|---|---|
+| BEFORE | median 1010.9 μs / max 4905.1 μs / **ratio 4.9×** |
+| AFTER | median 947.0 μs / max 1141.2 μs / **ratio 1.2×** |
+
+The first call to `scipy.sparse.linalg.spsolve` triggers a SuperLU
+factory initialisation that runs ~5–19× slower than the steady state
+(Phase 1 §3 D2 finding F-1.2.4). Sub-step 2.1 calls `spsolve` and
+`gmres` on a 1×1 dummy system at `tensor_utils` import time so the
+first run inside an algorithm sees the warmed-up code path. Cost is a
+one-time ~15 ms at import; runtime overhead is zero. This eliminates
+the root cause of the F-1.2.3 measurement artefact (single-run NNI
+canonical timing was 53 ms in the 1.2 profiled run because the first
+linear solve carried the warm-up; in 1.3 D3 with 3-run median + warm
+state the canonical median was 17 ms — a clean 3× difference that had
+nothing to do with the algorithm).
+
+### §7.2 Sub-step 2.2 — NNI canonical graceful fallback (Tier 1 E)
+
+| | Q7_small (n = 10) NNI canonical |
+|---|---|
+| BEFORE | ⛔ `AssertionError: res upper-bound violation` |
+| AFTER | ✓ λ = 10.756224 + `RuntimeWarning` (~875 ms via fallback) |
+
+The post-loop assertion `np.all(res[:nit + 1] <= 1.0 + 1e-10)` fires
+when `lambda_L` goes negative during canonical iteration, indicating
+the input `AA` is not a clean M-tensor at this scale. Sub-step 2.2
+turns the bare `assert` into a conditional check: if the violation
+fires while `halving=False`, warn and recursively call
+`nni(..., halving=True, initial_vector=initial_vector)`. The recursion
+guard is structural — `halving=True` cannot re-enter the canonical
+fallback branch, so even if the halving variant also violates the
+upper bound the original `AssertionError` simply surfaces. Healthy
+cases never enter the fallback path and remain bit-identical to
+Phase 1.
+
+The implementation is conditional + recursive `return` rather than a
+`try`/`except`, which avoids using exceptions for control flow and
+prevents accidentally catching unrelated `AssertionError`s.
+
+### §7.3 Sub-step 2.3 — HONI_exact silent-failure auto-detection (Tier 1 A)
+
+| | Multi-restart spectrum on Q7_large (20 random initial vectors) |
+|---|---|
+| BEFORE | 5/20 correct (λ ≈ 10.756); 15/20 silent fail at 15 distinct non-spectral fixed points (9.27–9.75) |
+| AFTER | **20/20 correct** (15 trials fall back to NNI on detection) |
+
+The Phase 1 instrumentation flags (`flag.honi.inner_trap` and
+`flag.honi.lambda_nonmonotone`) discriminated the 10 baseline entries
+perfectly: both fire on silent-failure rows, neither fires on
+correct-output rows. Sub-step 2.3 repurposes those flag conditions as
+an active fallback trigger — when both fire on the exact branch, warn
+and re-solve via NNI canonical. NNI's spectrum sweep was 20/20
+correct on Q7_large in Phase 1 §1.1.5, so it is the natural recovery
+target.
+
+The fallback is implemented through `_honi_fallback_to_nni`, a private
+helper at the top of `tensor_utils.py` that calls `nni(...,
+halving=False, ...)` and reshapes the return tuple into HONI's
+6-tuple shape (or 7-tuple when `record_history=True`). The third
+position differs (HONI: `total_inner_nit`; NNI: `lambda_L`); the
+helper returns `0` there because NNI is single-layer and has no inner
+Newton solver. HONI-only history fields are filled with zeros / NaN
+of the correct shape so callers expecting HONI's history layout still
+receive valid arrays.
+
+The inexact branch is intentionally **not** auto-fallback'd. Phase 1
+§2.2 showed that on Q7_large, HONI inexact fires `flag.inner_trap`
+71 times across its 77 outer iterations yet still converges to the
+correct λ. The `flag.lambda_nonmonotone` does not fire there because
+inexact's adaptive inner-tolerance schedule prevents the O(1) λ_U
+jumps. Auto-falling back inexact would be a false-positive triggered
+by inner_trap alone (which fires on its own elsewhere, e.g.
+`Q7_seed_alt2 HONI_inexact` 1 trap).
+
+A side effect worth noting: silent failure also wastes wall-clock.
+Q7_large HONI exact previously ran 6 outer iters in 899 ms producing
+the wrong answer; the fallback path runs NNI in 13 outer iters in
+440 ms producing the right answer. Catching the silent failure made
+the routine **51% faster as well as correct**.
+
+Stacked fallbacks compose cleanly. Q7_small HONI exact triggers the
+2.3 detection (HONI silent → NNI canonical), and the NNI canonical
+call then triggers the 2.2 condition (NNI canonical → NNI_ha). The
+user sees two stacked `RuntimeWarning`s in order, and the final
+return is from NNI_ha. There is no infinite recursion because NNI
+never re-enters HONI and the 2.2 fallback only fires when
+`halving=False`.
+
+### §7.4 Phase 2 final benchmark snapshot
+
+20 entries on the same 5 cases × 4 algorithms grid as Phase 1 §2.1.
+Phase 2 final wall-clock and λ from the post-2.3 run (3-run median).
+
+| Case | Algorithm | nit | wall (ms) | final λ | Status |
+|---|---|---:|---:|---:|---|
+| `Q7_baseline` | Multi | 5 | 10.4 | — | ✓ |
+| `Q7_baseline` | HONI_exact | 4 | 117.8 | 10.756234 | ✓ |
+| `Q7_baseline` | HONI_inexact | 4 | 106.9 | 10.756234 | ✓ |
+| `Q7_baseline` | NNI_spsolve | 16 | 39.1 | 10.756234 | ✓ |
+| `Q7_large` | Multi | 5 | 11.8 | — | ✓ |
+| `Q7_large` | HONI_exact | 13 | **439.8** | **10.756272** | ✓ via fallback (was 899 ms / 9.333980 ⚠) |
+| `Q7_large` | HONI_inexact | 77 | 23 950.7 | 10.756272 | ✓ (slow, no fallback by design) |
+| `Q7_large` | NNI_spsolve | 13 | 35.1 | 10.756272 | ✓ |
+| `Q7_small` | Multi | 5 | 10.3 | — | ✓ |
+| `Q7_small` | HONI_exact | 199 | **1706.9** | **10.756224** | ✓ via stacked fallback (was 1241 ms / 8.756218 ⚠) |
+| `Q7_small` | HONI_inexact | — | — | — | ⛔ Multi-internal assert (out of Tier 1 scope) |
+| `Q7_small` | NNI_spsolve | 199 | **904.6** | **10.756224** | ✓ via 2.2 fallback (was crash) |
+| `Q7_seed_alt1` | Multi | 5 | 10.3 | — | ✓ |
+| `Q7_seed_alt1` | HONI_exact | 4 | 150.7 | 10.955004 | ✓ |
+| `Q7_seed_alt1` | HONI_inexact | 4 | 135.7 | 10.955004 | ✓ |
+| `Q7_seed_alt1` | NNI_spsolve | 15 | 35.9 | 10.955004 | ✓ |
+| `Q7_seed_alt2` | Multi | 5 | 10.9 | — | ✓ |
+| `Q7_seed_alt2` | HONI_exact | 4 | 222.2 | 10.989793 | ✓ |
+| `Q7_seed_alt2` | HONI_inexact | 4 | 376.1 | 10.989793 | ✓ |
+| `Q7_seed_alt2` | NNI_spsolve | 23 | 56.0 | 10.989793 | ✓ |
+
+19 of 20 entries are now correct (Phase 1 had 14 correct, 2 silent
+wrong, 4 hard failure / silent — depending on count). The only
+remaining ⛔ is `Q7_small HONI_inexact`, which fires the **Multi**
+internal assertion (line 598, `max res > na+nb`) — a different
+mechanism from NNI's line 1334 assertion that 2.2 covered. That
+fallback is out of Tier 1 scope and is listed below.
+
+### §7.5 What was not done (Tier 3 + leftover)
+
+- **Candidate C — Inner-Multi `linear_solve` acceleration**: highest
+  leverage but highest parity risk. Deferred until the Tier 1 A
+  detection mechanism has had an observation period in production
+  use; if the detection rule turns out to false-positive on some
+  regime, fixing C without that signal would risk reverting to silent
+  wrong answers.
+- **Candidate B — Multi halving cap shrinking inside HONI inexact**:
+  the cap shrink would directly reduce the `chit_py >= 99` signal
+  that 2.3 relies on; running it before Tier 1 A is observationally
+  established would be premature.
+- **Multi internal assert graceful fallback**: `Q7_small HONI_inexact`
+  fires the Multi-internal `na+nb` upper-bound assertion (line 598).
+  This was not in Tier 1 scope, but the same pattern as 2.2 and 2.3
+  could be applied: detect the violation, warn, fall back to a
+  different algorithm. Worth picking up in a future Tier 1.5 if it
+  proves a recurring pain point.
+
+Phase 2 closes here. Tier 3 candidates remain on the table for a
+later phase once the Phase 2 safety net has been observed in real
+use.

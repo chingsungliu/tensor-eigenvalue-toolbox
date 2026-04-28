@@ -40,6 +40,21 @@ except ImportError:  # pragma: no cover — only triggered by unusual cwd
         return _NOOP_PROFILER
 
 
+# Warm up scipy.sparse.linalg.spsolve and gmres to avoid first-call SuperLU
+# factory init (~5–19× slower than steady state, see Phase 1 §3 D2). One-time
+# ~15 ms cost at import; makes first-iteration timing comparable to steady
+# state so single-run benchmarks are not dominated by warm-up artefacts.
+try:
+    from scipy.sparse import csc_matrix as _wu_csc
+    _wu_A = _wu_csc([[1.0]])
+    _wu_b = np.array([1.0])
+    spsolve(_wu_A, _wu_b)
+    gmres(_wu_A, _wu_b)
+    del _wu_csc, _wu_A, _wu_b
+except Exception:
+    pass  # warm-up is optional; algorithms still work without it
+
+
 def tenpow(x, p, matlab_compat=False):
     """計算向量 x 的 p 階 Kronecker 次方：x ⊗ x ⊗ ... ⊗ x（p 個 x 相 kron）。
 
@@ -598,6 +613,72 @@ def multi(AA, b, m, tol, record_history=False, matlab_compat=False):
     return u, nit, hal
 
 
+def _honi_fallback_to_nni(
+    AA, m, tol, *, initial_vector, maxit,
+    record_history, record_inner_history, matlab_compat,
+):
+    """Run NNI canonical and reshape its return into HONI's tuple shape.
+
+    Tier 1 A fallback (Sub-step 2.3) for HONI exact silent-failure on
+    n ≈ 50 random M-tensors (see ``docs/papers/honi_exact_silent_failure_n50.md``;
+    multi-restart sweep showed NNI canonical 20/20 vs. HONI exact 5/20).
+
+    HONI's tuple is ``(λ_U, x, outer_nit, total_inner_nit, outer_res_history,
+    lambda_history)`` (+ history dict if ``record_history=True``); NNI's tuple
+    is ``(λ_U, x, nit, λ_L, outer_res_history, lambda_U_history)`` (+ history
+    dict). Position 3 differs (HONI: total_inner_nit, NNI: λ_L); we set
+    ``total_inner_nit = 0`` because NNI is single-layer (no inner Newton
+    solver). HONI-only history fields are filled with zeros / NaN of the
+    correct shape so callers expecting HONI's history layout still receive
+    valid arrays. ``inner_histories`` (only present when
+    ``record_inner_history=True``) is filled with ``[None] * K`` since the
+    fallback bypasses the inner Multi solver entirely.
+    """
+    if record_history:
+        (nni_lam_U, nni_x, nni_nit, _nni_lam_L,
+         nni_res, nni_lam_hist, nni_history) = nni(
+            AA, m, tol,
+            linear_solver="spsolve",
+            halving=False,
+            maxit=maxit,
+            initial_vector=initial_vector,
+            record_history=True,
+            matlab_compat=matlab_compat,
+        )
+        K = nni_nit + 1
+        honi_history = {
+            "x_history": nni_history["x_history"],
+            "lambda_history": nni_history["lambda_U_history"],
+            "res_history": nni_history["res_history"],
+            "y_history": nni_history["y_history"],
+            "inner_tol_history": np.full(K, np.nan, dtype=np.float64),
+            "chit_history": np.zeros(K, dtype=np.float64),
+            "hal_per_outer_history": np.zeros(K, dtype=np.float64),
+            "innit_history": np.zeros(K, dtype=np.float64),
+            "hal_accum_history": np.zeros(K, dtype=np.float64),
+        }
+        if record_inner_history:
+            honi_history["inner_histories"] = [None] * K
+        return (
+            float(nni_lam_U), nni_x, int(nni_nit), 0,
+            nni_res, nni_lam_hist, honi_history,
+        )
+    (nni_lam_U, nni_x, nni_nit, _nni_lam_L,
+     nni_res, nni_lam_hist) = nni(
+        AA, m, tol,
+        linear_solver="spsolve",
+        halving=False,
+        maxit=maxit,
+        initial_vector=initial_vector,
+        record_history=False,
+        matlab_compat=matlab_compat,
+    )
+    return (
+        float(nni_lam_U), nni_x, int(nni_nit), 0,
+        nni_res, nni_lam_hist,
+    )
+
+
 def honi(
     A, m, tol=1e-12, *,
     linear_solver="exact",
@@ -874,10 +955,51 @@ def honi(
         # iter 4→5 moves by ~4% (the silent-failure jump). A fixed
         # absolute threshold would either miss F1 or false-fire on early
         # iters, so the gate uses relative jump + iteration index.
-        if _prof.enabled and nit >= 3 and abs(lambda_U_prev) > 0:
-            jump_rel = abs(lambda_U - lambda_U_prev) / abs(lambda_U_prev)
-            if jump_rel > 0.01:
-                _prof.flag("honi.lambda_nonmonotone")
+        jump_rel = (
+            abs(lambda_U - lambda_U_prev) / abs(lambda_U_prev)
+            if abs(lambda_U_prev) > 0 else 0.0
+        )
+        if _prof.enabled and nit >= 3 and jump_rel > 0.01:
+            _prof.flag("honi.lambda_nonmonotone")
+
+        # Sub-step 2.3 (Tier 1 A): silent-failure auto-detection + NNI fallback.
+        # The two F1 detection conditions above (Multi inner trap AND non-
+        # monotone λ_U after iter ≥ 3) discriminated 10/10 entries on the
+        # Phase 1 baseline (2 silent-failure rows fire both, 8 correct rows
+        # fire neither). When both fire on the exact branch, abandon the run
+        # and re-solve with NNI canonical, which the multi-restart sweep
+        # showed reliable on this regime (20/20 on Q7_large vs. HONI exact's
+        # 5/20). The inexact branch is intentionally NOT auto-fallback'd
+        # because its adaptive inner tolerance recovers the correct λ even
+        # while inner traps fire (Phase 1 §2.2 — Q7_large inexact has 71
+        # inner-trap fires but converges correctly).
+        if (
+            linear_solver == "exact"
+            and chit_py >= 99
+            and nit >= 3
+            and jump_rel > 0.01
+        ):
+            warnings.warn(
+                f"HONI_exact silent-failure detected at outer iter {nit}: "
+                f"Multi inner Newton hit iter cap (chit={chit_py}) AND λ_U "
+                f"jumped non-monotonically by {jump_rel * 100:.1f}% "
+                f"(λ_U: {lambda_U_prev:.6f} → {lambda_U:.6f}). "
+                f"Re-running with NNI (Newton-Noda Iteration) for "
+                f"trustworthy output. See docs/papers/"
+                f"honi_exact_silent_failure_n50.md for the mechanism. "
+                f"Consider using NNI directly on this problem (n ≳ 50, "
+                f"m ≥ 3 random M-tensors).",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return _honi_fallback_to_nni(
+                AA, m, tol,
+                initial_vector=initial_vector,
+                maxit=maxit,
+                record_history=record_history,
+                record_inner_history=record_inner_history,
+                matlab_compat=matlab_compat,
+            )
 
         lambda_history[nit] = lambda_U
 
@@ -1316,6 +1438,37 @@ def nni(
 
     # ---- Upper-bound sanity: pre-fill value 1.0 must bound all written res ----
     # §四 checklist #4: fail 表示 lambda_L < 0、AA 非 clean M-tensor、pre-fill 策略失效
+    # Tier 1 E (Sub-step 2.2): when the canonical (halving=False) branch hits
+    # this condition, fall back to halving=True instead of crashing. Halving
+    # guards monotonicity of λ_U and tends to keep λ_L non-negative on inputs
+    # where canonical fails (Q7_small empirically — see docs/performance_baseline
+    # §4 Finding #2 D3). If halving=True itself fails the same check the
+    # AssertionError surfaces directly, so there is no infinite recursion.
+    upper_bound_violated = bool(np.any(res[:nit + 1] > 1.0 + 1e-10))
+    if upper_bound_violated and not halving:
+        warnings.warn(
+            f"NNI canonical (halving=False) hit residual upper-bound "
+            f"violation at outer iter {nit} (max res = "
+            f"{float(np.max(res[:nit+1])):.3e}); this typically means "
+            f"lambda_L < 0 during iteration, indicating the input AA may "
+            f"not be a clean M-tensor at this scale. Re-running with "
+            f"halving=True from the same initial vector. Consider passing "
+            f"halving=True directly for this problem.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return nni(
+            AA, m, tol,
+            linear_solver=linear_solver,
+            gmres_opts=gmres_opts,
+            halving=True,
+            tol_theta=tol_theta,
+            maxit=maxit,
+            initial_vector=initial_vector,
+            record_history=record_history,
+            plot_res=plot_res,
+            matlab_compat=matlab_compat,
+        )
     assert np.all(res[:nit + 1] <= 1.0 + 1e-10), (
         f"res upper-bound violation: max res[:{nit+1}] = {res[:nit+1].max():.6e}, "
         f"pre-fill was 1.0 (should hold for clean M-tensor with lambda_L >= 0)"
