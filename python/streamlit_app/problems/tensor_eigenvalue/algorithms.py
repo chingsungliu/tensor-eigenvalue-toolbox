@@ -274,7 +274,7 @@ def render_multi() -> None:
                 m, n = 3, 20
             else:
                 m = st.number_input(
-                    "m (tensor order)", min_value=2, max_value=5, value=3, step=1
+                    "m (tensor order)", min_value=3, max_value=5, value=3, step=1
                 )
                 n = st.number_input(
                     "n (per-mode size)", min_value=5, max_value=50, value=20, step=1
@@ -400,7 +400,7 @@ def render_honi() -> None:
                 m, n = 3, 20
             else:
                 m = st.number_input(
-                    "m (tensor order)", min_value=2, max_value=5, value=3, step=1
+                    "m (tensor order)", min_value=3, max_value=5, value=3, step=1
                 )
                 n = st.number_input(
                     "n (per-mode size)", min_value=5, max_value=50, value=20, step=1
@@ -551,7 +551,7 @@ def render_nni() -> None:
                 m, n = 3, 20
             else:
                 m = st.number_input(
-                    "m (tensor order)", min_value=2, max_value=5, value=3, step=1
+                    "m (tensor order)", min_value=3, max_value=5, value=3, step=1
                 )
                 n = st.number_input(
                     "n (per-mode size)", min_value=5, max_value=50, value=20, step=1
@@ -710,7 +710,7 @@ def render_hni_vs_nni() -> None:
                 m, n = 3, 20
             else:
                 m = st.number_input(
-                    "m (tensor order)", min_value=2, max_value=5, value=3, step=1
+                    "m (tensor order)", min_value=3, max_value=5, value=3, step=1
                 )
                 n = st.number_input(
                     "n (per-mode size)", min_value=5, max_value=50, value=20, step=1
@@ -943,7 +943,7 @@ def render_eigenvalue_compare() -> None:
             m, n = 3, 20
         else:
             m = st.number_input(
-                "m (tensor order)", min_value=2, max_value=5, value=3, step=1,
+                "m (tensor order)", min_value=3, max_value=5, value=3, step=1,
                 key="cmp_eig_m_q7",
             )
             n = st.number_input(
@@ -1200,7 +1200,7 @@ def render_multilinear_compare() -> None:
             m, n = 3, 20
         else:
             m = st.number_input(
-                "m (tensor order)", min_value=2, max_value=5, value=3, step=1,
+                "m (tensor order)", min_value=3, max_value=5, value=3, step=1,
                 key="cmp_multi_m_q7",
             )
             n = st.number_input(

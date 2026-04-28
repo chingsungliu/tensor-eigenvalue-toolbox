@@ -2,6 +2,21 @@
 
 **Live demo**：<https://csliu-toolbox.streamlit.app>
 
+## Scope
+
+This toolbox targets tensor eigenvalue problems (third-order tensors
+and higher, m ≥ 3) following the Newton-Noda Iteration framework
+introduced in Liu, Guo, and Lin (Numer. Math. 2017) and the
+Higher-Order Newton Iteration in Liu (J. Sci. Comput. 2022).
+
+For m = 2 (matrix eigenvalue) problems, please use
+`scipy.sparse.linalg.eigs` or `numpy.linalg.eig` — those are
+industrial-grade implementations with better convergence guarantees
+on the matrix case. For m = 1 (linear scaling), no eigenvalue problem
+exists. The `nni` / `honi` / `multi` entry points raise `ValueError`
+when called with `m < 3` and the demo's `m` selector is bounded
+`[3, 5]`.
+
 ## 這是什麼
 
 這個 repo 是一個**練習用 sandbox**，目的是建立「把 MATLAB 演算法 port 成 Python 並驗證數值一致性」的標準工作流程。目前還不是正式的演算法庫，裡面只有一個示範用的 `gaussian_blur` 實作、一套對帳機制，以及一份把踩過的坑寫下來的文件。

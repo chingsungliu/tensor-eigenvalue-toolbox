@@ -565,8 +565,15 @@ def multi(AA, b, m, tol, record_history=False, matlab_compat=False, *, graceful=
     b_vec = np.asarray(b, dtype=np.float64)
     if b_vec.ndim != 1:
         raise ValueError(f"b must be 1-D, got shape {b_vec.shape}")
-    if not isinstance(m, (int, np.integer)) or m < 2:
-        raise ValueError(f"m must be integer >= 2, got {m}")
+    if not isinstance(m, (int, np.integer)):
+        raise ValueError(f"m must be integer, got {type(m).__name__}")
+    if m < 3:
+        raise ValueError(
+            f"Multi targets tensor problems with m >= 3 (received m={m}). "
+            f"For m=2 (matrix linear system), use scipy.sparse.linalg.spsolve "
+            f"or numpy.linalg.solve directly. For m=1, the system reduces "
+            f"to a scalar division."
+        )
     if tol <= 0:
         raise ValueError(f"tol must be > 0, got {tol}")
 
@@ -855,8 +862,15 @@ def honi(
     if not isinstance(m, (int, np.integer)):
         raise ValueError(f"m must be int, got {type(m).__name__}")
     m = int(m)
-    if m < 2:
-        raise ValueError(f"m must be >= 2, got {m}")
+    if m < 3:
+        raise ValueError(
+            f"HONI targets tensor eigenvalue problems with m >= 3 "
+            f"(received m={m}). For m=2 (matrix eigenvalue), use "
+            f"scipy.sparse.linalg.eigs or numpy.linalg.eig — those are "
+            f"industrial-grade implementations with better convergence "
+            f"guarantees on the matrix case. For m=1, no eigenvalue "
+            f"problem exists."
+        )
     if tol <= 0:
         raise ValueError(f"tol must be > 0, got {tol}")
     if linear_solver not in ("exact", "inexact"):
@@ -1338,8 +1352,15 @@ def nni(
     if not isinstance(m, (int, np.integer)):
         raise ValueError(f"m must be int, got {type(m).__name__}")
     m = int(m)
-    if m < 2:
-        raise ValueError(f"m must be >= 2, got {m}")
+    if m < 3:
+        raise ValueError(
+            f"NNI targets tensor eigenvalue problems with m >= 3 "
+            f"(received m={m}). For m=2 (matrix eigenvalue), use "
+            f"scipy.sparse.linalg.eigs or numpy.linalg.eig — those are "
+            f"industrial-grade implementations with better convergence "
+            f"guarantees on the matrix case. For m=1, no eigenvalue "
+            f"problem exists."
+        )
     if tol <= 0:
         raise ValueError(f"tol must be > 0, got {tol}")
     if maxit < 2:

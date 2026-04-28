@@ -1202,3 +1202,65 @@ The new vectorized `sp_Jaco_Ax` is bit-equivalent to the legacy
 kron-based implementation up to summation-order machine epsilon
 (~10⁻¹⁵ to 10⁻¹²), which is well below every parity test's
 tolerance.
+
+---
+
+## §11 Sub-step 3.5 — m ≥ 3 scope enforcement (Day 11)
+
+A user report on the live demo surfaced a `NaN`-propagating failure
+mode at NNI / m=2:
+
+> `nni failed — AssertionError: res upper-bound violation:`
+> `max res[:2] = nan, pre-fill was 1.0 (should hold for clean`
+> `M-tensor with lambda_L >= 0)`
+
+Rather than patching the m=2 path, the project's scope is
+narrowed explicitly to `m ≥ 3`, the regime targeted by the Newton-Noda
+framework (Liu, Guo, and Lin, Numer. Math. 2017) and the Higher-Order
+Newton Iteration (Liu, J. Sci. Comput. 2022). At `m = 2` the problem
+is a matrix eigenvalue / linear system, for which
+`scipy.sparse.linalg.eigs` and `numpy.linalg.solve` are the standard
+tools — NNI / HONI / Multi at m=2 collapse to power iteration / a
+single matrix solve and offer no algorithmic advantage.
+
+### §11.1 Algorithm validation
+
+`multi()`, `honi()`, and `nni()` raise `ValueError` when `m < 3`,
+with messages pointing at the appropriate matrix-case tool. The
+existing input-validation block at each function's top now reads
+`if m < 3:` instead of the previous `m < 2`.
+
+`sp_Jaco_Ax()` does **not** validate `m`: it is a stateless utility
+function whose `m=1` (zero matrix) and `m=2` (`J = AA`) outputs are
+mathematically meaningful corner cases. Keeping the fast paths
+preserves API freedom for future NLS / NCP extensions that might
+reuse the function with `m < 3` inputs.
+
+### §11.2 Demo UI guard
+
+All six algorithm renderers in
+`python/streamlit_app/problems/tensor_eigenvalue/algorithms.py`
+now bound the `m (tensor order)` `st.number_input` widget at
+`min_value=3` (the previous bound was `min_value=2`). A user
+cannot select `m < 3` from the UI; the algorithm-level
+`ValueError` from §11.1 catches anything that bypasses the
+widget (e.g. a programmatic call from a notebook).
+
+### §11.3 README scope note
+
+The repo `README.md` carries a "Scope" section directly under the
+title that states the m ≥ 3 constraint and points to
+`scipy.sparse.linalg.eigs` / `numpy.linalg.eig` for matrix-case
+problems. The note also mentions the `ValueError` and the UI
+selector bound so a reader does not have to discover the
+constraint by tripping over it.
+
+### §11.4 Verification
+
+- Algorithm-level: each of `nni / honi / multi` raises
+  `ValueError` with an informative message for `m ∈ {1, 2}`.
+- m=3 unaffected: full benchmark suite and the seven parity tests
+  pass unchanged (parity tests always run at m ≥ 3).
+- Sub-step 3.3's `sp_Jaco_Ax` unit tests still pass — they
+  intentionally cover `m=1` and `m=2` to keep `sp_Jaco_Ax`'s
+  utility-function contract intact.
