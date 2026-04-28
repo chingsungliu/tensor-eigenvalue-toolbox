@@ -133,3 +133,52 @@ generate_reference
 - 濾波器核要自己手搓，例如 `h = exp(-x.^2 / (2*sigma^2)); h = h / sum(h);`
 
 如果未來裝了新 toolbox，記得回來更新這段。
+
+---
+
+## Deployment workflow
+
+The Streamlit Cloud demo at <https://csliu-toolbox.streamlit.app> is
+auto-rebuilt by a webhook on `git push origin main`. Day 8 saw two
+cases where the webhook did not fire and the demo kept serving an
+older container, so the workflow below treats every push as
+"verify before assuming live".
+
+After pushing to `main`:
+
+1. Wait 2-3 minutes for Streamlit Cloud auto-rebuild.
+2. Run `python scripts/check_deploy.py` to verify push state.
+3. Open the demo URL in a browser and scroll the sidebar to the
+   bottom. Look at the `Build: <sha>` caption.
+   - If the shown SHA matches the "Expected build" printed by the
+     check script, deploy is current.
+   - If the shown SHA differs (older), Cloud has not redeployed.
+     Open <https://share.streamlit.io/>, find the `csliu-toolbox`
+     app, click **Manage app → Reboot**. Wait ~2 minutes, refresh
+     demo, recheck sidebar.
+   - If `Build: unknown` is shown, the Cloud container has no
+     `.git/` directory; see "Fallback B" below.
+4. If reboot does not pick up the latest commit, force a rebuild
+   with a trivial commit:
+
+   ```bash
+   echo "" >> README.md
+   git commit -am "redeploy"
+   git push
+   ```
+
+### Fallback B — `.git/` not present on Cloud container
+
+If the demo sidebar shows `Build: unknown` after a successful local
+read, the Cloud container is not preserving `.git/` after build. In
+that case, switch the build-SHA mechanism from file-read to one of:
+
+- **Streamlit secrets** — set `BUILD_SHA = "<short-sha>"` in the app's
+  Secrets panel and read via `st.secrets["BUILD_SHA"]`. Manual update
+  per push, so this is a stop-gap only.
+- **GitHub Actions write-and-commit** — a workflow that updates a
+  tracked `python/streamlit_app/_build_info.py` with the head SHA
+  and commits before the deploy webhook fires. Adds CI complexity but
+  removes the manual step.
+
+Pick the path with the User before implementing.

@@ -43,6 +43,27 @@ def _inject_custom_css() -> None:
     st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
 
 
+def _read_build_sha() -> str:
+    """Best-effort short SHA from the repo's ``.git/HEAD``.
+
+    Works on local dev (cwd is the repo) and on Streamlit Cloud (which
+    ``git clone``s the repo into the container, leaving ``.git/`` intact).
+    Pure file read, no subprocess. Returns ``"unknown"`` on any failure
+    so the sidebar footer never crashes the app — the caption is purely
+    informational.
+    """
+    try:
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        head = (repo_root / ".git" / "HEAD").read_text(encoding="utf-8").strip()
+        if head.startswith("ref:"):
+            ref = head.split(maxsplit=1)[1]
+            ref_path = repo_root / ".git" / ref
+            return ref_path.read_text(encoding="utf-8").strip()[:7]
+        return head[:7]  # detached HEAD
+    except Exception:
+        return "unknown"
+
+
 # Two-level routing table.
 # Value = dict[str, callable]  → active problem, expand to algorithm radio.
 # Value = None                 → coming-soon placeholder.
@@ -84,6 +105,11 @@ def main() -> None:
             key="sidebar_about_btn",
         ):
             st.session_state["show_about"] = True
+
+        # Build SHA footer — `scripts/check_deploy.py` prints the expected
+        # SHA after `git push`; visitors can compare against this caption to
+        # confirm Streamlit Cloud has redeployed the latest commit.
+        st.caption(f"Build: `{_read_build_sha()}`")
 
     if st.session_state.get("show_about", False):
         render_about()
