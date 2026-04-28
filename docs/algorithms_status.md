@@ -11,7 +11,7 @@
 
 | 演算法 | 角色 | 研究定位 | 完成日 |
 |---|---|---|---|
-| **NNI** | **使用者主演算法** | Nonnegative Newton Iteration — 單層 Newton + 結構化 hyperbolic step、求非負張量最大 H-eigenvalue | **Day 4** |
+| **NNI** | **使用者主演算法** | Newton-Noda Iteration — 單層 Newton + 結構化 hyperbolic step、求非負張量最大 H-eigenvalue | **Day 4** |
 | HONI | 對比 / 另一角度 | H-eigenvalue Optimization via Newton Iteration — 雙層 shift-invert iteration | Day 2 末 |
 | Multi | 共用基礎 | Multilinear Newton — 正解多線性系統 `A·u^(m-1) = b` 的 solver（HONI 的內層、單獨 port 為可獨立呼叫的模組） | Day 2 |
 

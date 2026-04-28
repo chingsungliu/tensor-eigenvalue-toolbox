@@ -10,29 +10,49 @@ from __future__ import annotations
 import streamlit as st
 
 
-# Paper citations. Each entry: title, venue, optional bibtex.
-# To fill a citation later: replace the placeholder fields and (optionally)
-# set `bibtex` to a multi-line string — it will render as a syntax-
-# highlighted code block.
+# Paper citations. Each entry: id, title, authors, year, venue, doi, note,
+# optional bibtex. DOI links resolve via doi.org. To add a new paper, append
+# a dict with these keys; set `bibtex` to a multi-line string to render a
+# syntax-highlighted code block beneath the entry.
 PAPERS = [
     {
-        "title": "Paper 1 — title to be added",
-        "venue": "Journal name, Year",
+        "id": 1,
+        "title": "Newton-Noda iteration for finding the Perron pair of a weakly irreducible nonnegative tensor",
+        "authors": "Liu, C.-S., Guo, C.-H., Lin, W.-W.",
+        "year": 2017,
+        "venue": "Numerische Mathematik, 137(1), 63-90",
+        "doi": "10.1007/s00211-017-0869-7",
+        "note": "Reference paper for NNI / NNI_ha in this toolbox",
         "bibtex": None,
     },
     {
-        "title": "Paper 2 — title to be added",
-        "venue": "Journal name, Year",
+        "id": 2,
+        "title": "Exact and inexact iterative methods for finding the largest eigenpair of a weakly irreducible nonnegative tensor",
+        "authors": "Liu, C.-S.",
+        "year": 2022,
+        "venue": "Journal of Scientific Computing, 91(3), 78",
+        "doi": "10.1007/s10915-022-01852-5",
+        "note": "Reference paper for HONI (exact / inexact branches)",
         "bibtex": None,
     },
     {
-        "title": "Paper 3 — title to be added",
-        "venue": "Journal name, Year",
+        "id": 3,
+        "title": "Newton-Noda iteration for computing the ground states of nonlinear Schrödinger equations",
+        "authors": "Du, C.-E., Liu, C.-S.",
+        "year": 2022,
+        "venue": "SIAM Journal on Scientific Computing, 44(4), A2370-A2385",
+        "doi": "10.1137/21M1435793",
+        "note": "NNI extension to nonlinear Schrödinger equations (potential next problem class)",
         "bibtex": None,
     },
     {
-        "title": "Paper 4 — title to be added",
-        "venue": "Journal name, Year",
+        "id": 4,
+        "title": "A positivity preserving inexact Noda iteration for computing the smallest eigenpair of a large irreducible M-matrix",
+        "authors": "Jia, Z., Lin, W.-W., Liu, C.-S.",
+        "year": 2015,
+        "venue": "Numerische Mathematik, 130(4), 645-679",
+        "doi": "10.1007/s00211-014-0677-2",
+        "note": "Theoretical foundation: M-matrix Noda iteration (NNI's predecessor)",
         "bibtex": None,
     },
 ]
@@ -50,10 +70,10 @@ def render_about() -> None:
 
     st.header("About — Algorithm Toolbox")
     st.caption(
-        "An interactive demo accompanying the author's research on tensor "
-        "eigenvalue computation. The algorithms are ported from MATLAB to "
-        "Python with per-iteration parity testing; this site lets you run "
-        "them directly in the browser."
+        "An interactive companion to the author's research on tensor "
+        "eigenvalue computation. Each algorithm is ported from MATLAB to "
+        "Python and validated against the original reference via per-iteration "
+        "parity testing; this site lets you run them directly in the browser."
     )
 
     col_l, col_r = st.columns([1, 2])
@@ -111,8 +131,13 @@ def render_about() -> None:
         "If you use this toolbox or build on the algorithms, please cite "
         "the relevant paper(s). BibTeX entries to be added."
     )
-    for i, p in enumerate(PAPERS, start=1):
-        st.markdown(f"**[{i}]** {p['title']}  \n_{p['venue']}_")
+    for p in PAPERS:
+        st.markdown(
+            f"**[{p['id']}]** {p['title']}  \n"
+            f"{p['authors']} ({p['year']}). _{p['venue']}_.  \n"
+            f"DOI: [{p['doi']}](https://doi.org/{p['doi']})"
+        )
+        st.caption(f"→ {p['note']}")
         if p["bibtex"]:
             st.code(p["bibtex"], language="bibtex")
 

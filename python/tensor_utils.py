@@ -873,7 +873,7 @@ def honi(
 
 
 # ---------------------------------------------------------------------------
-# NNI (Nonnegative Newton Iteration) — Layer 3 step 3/3
+# NNI (Newton-Noda Iteration) — Layer 3 step 3/3
 # ---------------------------------------------------------------------------
 
 # gmres default options (user-facing names; translated to scipy's names at call site)

@@ -324,7 +324,7 @@ end
 
 ### 5.1 非負投影 — **原 canonical 完全不投影、僅正規化**
 
-**重要釐清**：NNI 的名稱 Nonnegative Newton Iteration 意味著**目標解是非負特徵對**、**不是每 iter 都強制投影到非負**。
+**重要釐清**：NNI = Newton-Noda Iteration、命名引用 Noda (1971) 的 Newton iteration framework；本工具箱的 NNI 是該 framework 在 nonnegative M-tensor 場景的延伸應用。目標解是**非負特徵對**、但 nonnegativity 沿迭代路徑透過 Perron-Frobenius 類性質自然保持、**不靠每 iter 強制投影到非負**。
 
 MATLAB NNI.m 對 `x` 的唯一變換：
 - line 32: `x = x / norm(x)`（L2 正規化）

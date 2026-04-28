@@ -32,7 +32,7 @@
 
 | | HNI / HONI | NNI |
 |---|---|---|
-| 全名推測 | **H-eigenvalue Newton Iteration** / H-eigenvalue Optimization via Newton Iteration | **Nonnegative Newton Iteration** |
+| 全名推測 | **H-eigenvalue Newton Iteration** / H-eigenvalue Optimization via Newton Iteration | **Newton-Noda Iteration** |
 | 結構 | 雙層迴圈：外層更新 λ、內層用 Multi.m 解多線性系統 `(λI - A)u^(m-1) = b` | 單層 Newton：直接對 `F(x) = Ax^(m-1) - λx^(m-1)` 做 Jacobian-based iteration |
 | 特性 | 收斂需要內層 linear solve，成本高但穩定 | 收斂快但你自己在 `Test_Heig3.m` 裡面有註解警告：**「一般來說 NNI 相當穩定，不會隨著 n,m 影響，但接下來的例子會讓 NNI 難以使用」** |
 | 收斂理論 | 需要 m-matrix 性質、shifted-inverse-style 論證 | 需要 Jacobian non-singular 條件 |

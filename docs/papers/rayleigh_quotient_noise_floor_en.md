@@ -28,7 +28,7 @@ When $\mathcal{A}$ is a positive M-tensor, Perron-Frobenius-type results guarant
 
 ### 1.2 The NNI Algorithm
 
-NNI (Nonnegative Newton Iteration) is a Newton-type iterative method for solving (1.1), proposed by the author in earlier work (2016, 2020). Its key idea is to recast (1.1) as a nonlinear system,
+Newton-Noda Iteration (NNI), introduced for nonnegative tensors in Liu, Guo and Lin (Numer. Math. 2017) and extended in subsequent work, builds on the Newton iteration framework of Noda (1971) for nonnegative matrices. Its key idea is to recast (1.1) as a nonlinear system,
 
 $$
 F(x, \lambda) := \mathcal{A} x^{m-1} - \lambda \cdot x^{[m-1]} = 0,

@@ -187,11 +187,14 @@ def _render_data_source_block(renderer_key: str):
 def render_multi() -> None:
     st.header("multi(AA, b, m, tol)")
     st.caption(
-        "求解多線性系統 `A · u^(m-1) = b` 的正解。外層 Newton + 內層三等分（one-third）"
-        "halving line search。HNI 線的 Newton solver 基礎層、HONI 會呼叫此 module 做內層。"
+        "Solver for the multilinear system `A · u^(m-1) = b`. A Newton iteration "
+        "with one-third halving line search drives `u` toward the unique positive "
+        "solution. Multi serves as the inner solver inside HONI's shift-invert "
+        "step; here it is exposed standalone for direct inspection."
     )
     st.caption(
-        "⚠️ 外層迭代上限硬編碼 `nit < 100`（MATLAB `Multi.m` 行為）— 無 `maxit` 參數。"
+        "⚠️ Outer iteration is capped at `nit < 100` (matches the MATLAB "
+        "`Multi.m` reference); no `maxit` parameter is exposed."
     )
 
     col_in, col_out = st.columns([1, 2])
@@ -298,14 +301,17 @@ def render_multi() -> None:
 def render_honi() -> None:
     st.header("honi(A, m, tol, *, linear_solver, maxit, initial_vector)")
     st.caption(
-        "求 m-order n-dim tensor 的最大 H-eigenvalue（外層 eigenvalue iteration + "
-        "內層 Multi Newton、shift-invert 結構）。`exact` / `inexact` 兩分支數學上求解"
-        "同一問題、迭代路徑不同。"
+        "Computes the largest H-eigenvalue of an m-order, n-dimensional tensor "
+        "by a two-level shift-invert iteration: an outer Newton update on `λ_U` "
+        "and an inner multilinear solve `(λ_U · I − A) · y^(m-1) = x^(m-1)`. "
+        "The `exact` and `inexact` branches solve the same eigenproblem with "
+        "different inner-solve tolerance strategies (fixed vs. adaptive)."
     )
     st.caption(
-        "⚠️ `lambda_U → eigenvalue` 尾段 `(λ·I - A)` near-singular、內層 `y` 量級"
-        "可爆到 O(10^6)。最終 λ / x 仍 bit-identical（見 `memory/feedback_honi_multi_"
-        "fragility_propagation.md`）。"
+        "⚠️ Near convergence the shifted system becomes nearly singular and the "
+        "inner solution `y` can grow to O(10^6); the returned `λ` and `x` remain "
+        "bit-identical to the MATLAB reference (see "
+        "`memory/feedback_honi_multi_fragility_propagation.md`)."
     )
 
     col_in, col_out = st.columns([1, 2])
@@ -436,13 +442,18 @@ def render_honi() -> None:
 def render_nni() -> None:
     st.header("nni(A, m, tol, *, linear_solver, maxit, initial_vector)")
     st.caption(
-        "**使用者主演算法** — Nonnegative Newton Iteration：求非負 M-tensor 的最大 "
-        "H-eigenvalue + 非負 eigenvector。單層 Newton（對比 HONI 雙層 shift-invert）。"
-        "Rayleigh-quotient 式 λ 上下界收斂。"
+        "**Newton-Noda Iteration** — computes the largest H-eigenvalue and the "
+        "corresponding nonnegative eigenvector of a nonnegative M-tensor. A "
+        "single-layer Newton step on the residual is paired with a Rayleigh-"
+        "quotient bracket `λ_L ≤ λ_★ ≤ λ_U` that contracts monotonically. The "
+        "optional `halving=True` variant (NNI_ha) inserts a guarded line search "
+        "on the Newton step when the residual fails to decrease."
     )
     st.caption(
-        "📎 研究筆記：`docs/papers/rayleigh_quotient_noise_floor_en.md` — "
-        "描述 `min(x_i) → 0` 時的 noise floor 公式 `ε·n^(m-1)/min(x_i)^(m-1)`。"
+        "📎 Research note: `docs/papers/rayleigh_quotient_noise_floor_en.md` "
+        "quantifies the Rayleigh-quotient noise floor "
+        "`ε · n^(m-1) / min_i(x_i)^(m-1)` that bounds attainable tolerance as "
+        "`min_i(x_i) → 0`."
     )
 
     col_in, col_out = st.columns([1, 2])
@@ -581,13 +592,18 @@ def render_nni() -> None:
 def render_hni_vs_nni() -> None:
     st.header("HNI vs NNI — 同一 AA 跑兩個演算法、比較收斂行為")
     st.caption(
-        "兩演算法都求最大 H-eigenvalue，但結構不同：HONI 用**雙層 shift-invert**"
-        "（外層更新 λ、內層 Multi Newton 解 `(λ·I − A)·y^(m−1) = x^(m−1)`）；"
-        "NNI 用**單層 Newton**（每 iter 解 `(−M_shifted)·y = x^(m−1)`、Rayleigh-quotient 更新 λ）。"
+        "Side-by-side run of HONI and Newton-Noda Iteration on the same tensor "
+        "`A`. HONI is a two-level scheme: an outer Newton step on `λ` and an "
+        "inner multilinear solve `(λ · I − A) · y^(m-1) = x^(m-1)`. NNI is "
+        "single-level: each step solves a shifted Newton system and updates "
+        "`λ` via the Rayleigh-quotient bracket. Running both from the same "
+        "initial vector cross-validates the eigenvalue to machine precision "
+        "(`|Δλ| ≈ 1.8×10⁻¹⁵` on the Q7 test case)."
     )
     st.caption(
-        "📎 Port / fragility 背景：`docs/algorithms_status.md` §5 parity 總表 + "
-        "三種 fragility 模式（halving / shift-invert / Rayleigh-quotient）。"
+        "📎 Port and fragility background: `docs/algorithms_status.md` §5 "
+        "(parity summary) and the three fragility regimes — halving / "
+        "shift-invert / Rayleigh-quotient."
     )
 
     col_in, col_out = st.columns([1, 2])
@@ -798,14 +814,17 @@ def render_hni_vs_nni() -> None:
 def render_eigenvalue_compare() -> None:
     st.header("Eigenvalue solver comparison — 2-3 runs side-by-side")
     st.caption(
-        "並排執行 2 或 3 個 HONI / NNI runs，每個 run 獨立選演算法、tol、maxit、solver。"
-        "所有 runs 共用同一個 AA + 初始向量，便於比較不同 tol 下的 noise floor 行為、"
-        "或 HONI 雙層 shift-invert vs NNI 單層 Newton 的收斂路徑差異。"
+        "Run 2 or 3 eigenvalue solves side-by-side, each independently "
+        "configurable in algorithm (HONI / NNI), tolerance, iteration cap, and "
+        "linear solver. All runs share the same tensor and initial vector, "
+        "making this view well suited to tolerance sweeps, noise-floor studies, "
+        "and comparing direct (`spsolve`) vs. iterative (`gmres`) inner solvers "
+        "on near-singular systems."
     )
     st.caption(
-        "📎 比舊的「HONI vs NNI comparison」tile 更 general："
-        "2-run 固定 HONI+NNI 版本聚焦單一敘事；這個 renderer 適合 `tol` 掃 / noise floor 研究 / "
-        "同一演算法不同 solver 對比（spsolve vs gmres 在近奇異系統的穩定度）。"
+        "📎 More general than the fixed two-algorithm \"HONI vs NNI comparison\" "
+        "tile above; that one tells a single cross-validation story, this one "
+        "is a configurable lab."
     )
 
     # ------------------------- Section 1: Shared config -------------------------
@@ -1043,17 +1062,19 @@ def render_eigenvalue_compare() -> None:
 def render_multilinear_compare() -> None:
     st.header("Multilinear solver comparison — 2-3 Multi runs (tol sweep)")
     st.caption(
-        "並排執行 2 或 3 個 Multi runs，所有 runs 共用同一 `A` + `b`，僅 `tol` 不同。"
-        "適合觀察 Multi 的 Newton 收斂在不同停止門檻下的 outer iter / halving 行為。"
+        "Run 2 or 3 Multi solves side-by-side on the same `A` and `b`, varying "
+        "only `tol`. Useful for inspecting how the Newton outer-iteration count "
+        "and halving activity respond to the stopping threshold."
     )
     st.caption(
-        "⚠️ Multi 在 `m≥3` + random AA 常 trap-and-diverge 在 halving path（設計為 near-optimal "
-        "微調、不是大幅 overshoot 修正）— 這是演算法本質、非 port bug。"
-        "詳見 `memory/feedback_multi_halving_fragility.md`。"
+        "⚠️ For `m ≥ 3` with random `A`, Multi often traps in its halving path "
+        "(the line search is designed for near-optimal refinement, not large "
+        "overshoot correction) — algorithmic, not a port bug. See "
+        "`memory/feedback_multi_halving_fragility.md`."
     )
     st.caption(
-        "📎 Multi 的外層迭代上限硬編碼 `nit < 100`（MATLAB `Multi.m` 行為）、"
-        "無 `maxit` 或 `solver` 參數、所以 per-run 只能 vary `tol`。"
+        "📎 Multi has no `maxit` or `solver` knob (outer cap is hard-coded "
+        "`nit < 100`), so per-run variation is limited to `tol`."
     )
 
     # ------------------------- Section 1: Shared config -------------------------

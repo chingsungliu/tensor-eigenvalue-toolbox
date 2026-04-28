@@ -177,7 +177,7 @@ Port iterative algorithm **不能只比最終輸出**，因為任何中間步驟
 
 ## 為什麼 NNI 不在這個資料夾
 
-**HNI**（H-eigenvalue Newton Iteration）和 **NNI**（Nonnegative Newton Iteration）是**並列獨立的演算法**，沒有呼叫關係：
+**HNI**（H-eigenvalue Newton Iteration）和 **NNI**（Newton-Noda Iteration）是**並列獨立的演算法**，沒有呼叫關係：
 
 - HNI 解「求非負張量最大 H-特徵值」用**外層 eigenvalue 更新 + 內層 Newton 解多線性系統**的雙層結構
 - NNI 直接對 `F(x) = Ax^(m-1) - λ·x^(m-1)` 做 Jacobian-based single-loop Newton
