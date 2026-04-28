@@ -428,7 +428,7 @@ def sp_Jaco_Ax(AA, x, m, matlab_compat=False):
     return J
 
 
-def multi(AA, b, m, tol, record_history=False, matlab_compat=False):
+def multi(AA, b, m, tol, record_history=False, matlab_compat=False, *, graceful=False):
     """求解多線性系統 A·u^(m-1) = b 的正解，使用外層 Newton + 內層三等分（one-third）halving line search。
 
     對應 MATLAB reference：`matlab_ref/hni/Multi.m` 第 1-54 行。演算法結構與
@@ -452,6 +452,20 @@ def multi(AA, b, m, tol, record_history=False, matlab_compat=False):
     matlab_compat : bool, default False
         **對 multi 本身是 no-op**。會傳進 `tpv` / `sp_Jaco_Ax`，但那兩支也是
         no-op。保留以維持模組 API 一致。
+    graceful : bool, default False, **keyword-only**
+        Sub-step 2.7 (Phase 2) safety net for HONI inner-solver use. When
+        `False` (the default), the post-loop residual upper-bound assert
+        fires unchanged — this is the parity-safe path because well-
+        conditioned cases never trip the bound. When `True`, the same
+        condition emits a `RuntimeWarning` and returns the best-effort
+        `u` instead of raising. HONI passes `graceful=True` so that an
+        ill-conditioned inner solve (Q7_small (n=10) HONI_inexact case
+        empirically — see `docs/performance_baseline.md` §7) does not
+        crash the whole stack; the caller receives a (possibly noisy)
+        `u`, normalizes it via its own outer loop, and lets that loop
+        decide whether to converge, hit its own assert, or run out of
+        iterations. Default `False` keeps standalone Multi / parity
+        tests bit-identical to Phase 1.
 
     Returns
     -------
@@ -595,10 +609,27 @@ def multi(AA, b, m, tol, record_history=False, matlab_compat=False):
     # Upper-bound sanity: pre-fill 值 (na+nb) 必須大於任何實際算出的殘差，否則
     # `min(res)` 的邏輯會被 pre-fill 值誤觸發收斂。失敗表示 hazard analysis §二
     # 選項 (A) 的 upper-bound 假設在此輸入下不成立，需檢查數學假設。
-    assert np.all(res[:nit + 1] <= na + nb + 1e-10), (
-        f"res upper-bound violation: max res[:{nit+1}] = {res[:nit+1].max():.6e}, "
-        f"na+nb = {na + nb:.6e}"
-    )
+    # Sub-step 2.7: when graceful=True (HONI inner-solver use), convert the
+    # assert to a warning and return best-effort u instead of crashing the
+    # whole stack. Default graceful=False retains the original assert so
+    # standalone use and parity tests are bit-identical.
+    upper_bound_violated = bool(np.any(res[:nit + 1] > na + nb + 1e-10))
+    if upper_bound_violated and graceful:
+        warnings.warn(
+            f"Multi residual upper-bound violation at nit={nit} "
+            f"(max res = {res[:nit+1].max():.3e}, "
+            f"na+nb = {na + nb:.3e}); returning best-effort u. "
+            f"This typically indicates the inner Newton system is "
+            f"ill-conditioned beyond Multi's halving recovery range. "
+            f"Caller should expect a noisy or normalized-garbage solution.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    else:
+        assert np.all(res[:nit + 1] <= na + nb + 1e-10), (
+            f"res upper-bound violation: max res[:{nit+1}] = {res[:nit+1].max():.6e}, "
+            f"na+nb = {na + nb:.6e}"
+        )
 
     if record_history:
         history = {
@@ -899,17 +930,24 @@ def honi(
                 float(np.min(res)) * float(np.min(x)) ** (m - 1) / nit_mat,
             )                                                             # line 67
 
-        # Call Multi (inner Newton solver)
+        # Call Multi (inner Newton solver). graceful=True (Sub-step 2.7)
+        # converts Multi's residual upper-bound assert into a warning + a
+        # best-effort u, so that an ill-conditioned inner solve does not
+        # crash the whole HONI stack. The returned y may be noisy in that
+        # case; HONI normalizes it via the branch updates below and lets
+        # the outer loop decide what to do with it.
         with _prof.time("honi.inner_multi_call"):
             if record_inner_history:
                 y, chit_py, hal_inn, inner_hist = multi(
                     AA_shifted, x, m, inner_tol,
                     record_history=True, matlab_compat=matlab_compat,
+                    graceful=True,
                 )
             else:
                 y, chit_py, hal_inn = multi(
                     AA_shifted, x, m, inner_tol,
                     record_history=False, matlab_compat=matlab_compat,
+                    graceful=True,
                 )
                 inner_hist = None
 
@@ -1015,6 +1053,36 @@ def honi(
                 inner_histories.append(inner_hist)
 
     # ---- Upper-bound sanity: pre-fill value 1.0 must bound all written res ----
+    # Sub-step 2.7 (d.1, Tier 1): when the inexact branch trips this bound the
+    # adaptive inner-tolerance schedule has driven the bracket past
+    # `lambda_L = 0` and the rest of the trajectory is meaningless. Fall back
+    # to NNI canonical (the same _honi_fallback_to_nni helper Sub-step 2.3
+    # uses for the exact branch's silent-failure case). The exact branch
+    # keeps its bare assert because exact is fully covered by 2.3's
+    # detection-based fallback above; reaching this assert on exact means
+    # something genuinely unexpected has occurred and surfacing the error
+    # is the right behavior.
+    upper_bound_violated = bool(np.any(res[:nit + 1] > 1.0 + 1e-10))
+    if upper_bound_violated and linear_solver == "inexact":
+        warnings.warn(
+            f"HONI inexact hit residual upper-bound violation at nit={nit} "
+            f"(max res = {float(np.max(res[:nit+1])):.3e}); this typically "
+            f"means lambda_L < 0 during inexact iteration, indicating the "
+            f"adaptive inner-tolerance schedule could not stabilize the "
+            f"trajectory. Falling back to NNI canonical for trustworthy "
+            f"output. Consider using NNI directly on this problem "
+            f"(small n, m >= 3 random M-tensors).",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return _honi_fallback_to_nni(
+            AA, m, tol,
+            initial_vector=initial_vector,
+            maxit=maxit,
+            record_history=record_history,
+            record_inner_history=record_inner_history,
+            matlab_compat=matlab_compat,
+        )
     assert np.all(res[:nit + 1] <= 1.0 + 1e-10), (
         f"res upper-bound violation: max res[:{nit+1}] = {res[:nit+1].max():.6e}, "
         f"pre-fill was 1.0 (should hold since res = |max-min|/lambda_U <= 1)"

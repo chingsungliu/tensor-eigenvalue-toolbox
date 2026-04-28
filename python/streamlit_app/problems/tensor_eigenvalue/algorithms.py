@@ -11,6 +11,9 @@ All four default to the Q7-style sparse M-tensor built by
 """
 from __future__ import annotations
 
+import warnings
+from contextlib import contextmanager
+
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
@@ -19,6 +22,61 @@ from streamlit_app._internal.snippets import read_snippet
 from streamlit_app.problems.tensor_eigenvalue.defaults import build_q7_tensor
 from streamlit_app.problems.tensor_eigenvalue.uploads import load_tensor_file
 from tensor_utils import honi, multi, nni
+
+
+# ---------------------------------------------------------------------------
+# Algorithm warning capture / display (Sub-step 2.6, Tier 1 A user-facing)
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def _capture_algorithm_warnings():
+    """Capture warnings raised inside algorithm calls.
+
+    Yields a list that gets populated with ``warnings.WarningMessage``
+    objects. The caller stashes the list in ``st.session_state`` and
+    later renders it via ``_render_warnings()`` at output time, so the
+    Sub-step 2.2 / 2.3 fallback notices surface in the demo UI rather
+    than only on stderr / Streamlit Cloud's log stream.
+    """
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        yield caught
+
+
+def _render_warnings(warning_records) -> None:
+    """Display captured ``WarningMessage``s as ``st.warning`` with dedup.
+
+    Identical messages are shown once with a "(this warning fired N
+    times)" suffix; distinct messages are shown in their original order
+    of first occurrence. ``None`` and the empty list both render
+    nothing — important because the caller may stash ``caught_warnings``
+    from the failure path where the algorithm raised before warning
+    capture saw anything.
+
+    Dedup matters because some fallback chains (e.g. Sub-step 2.7's
+    HONI inexact + Multi graceful path on Q7_small) can emit ~189
+    Multi residual upper-bound warnings before HONI's outer loop gives
+    up. Showing them all would flood the demo UI; collapsing them into
+    a single notice with a count keeps the message visible and the
+    layout clean.
+    """
+    if not warning_records:
+        return
+    # message text → (first_index, count)
+    seen: dict[str, list[int]] = {}
+    for i, w in enumerate(warning_records):
+        msg = str(w.message)
+        if msg not in seen:
+            seen[msg] = [i, 1]
+        else:
+            seen[msg][1] += 1
+    sorted_msgs = sorted(seen.items(), key=lambda kv: kv[1][0])
+    for msg, (_, count) in sorted_msgs:
+        if count > 1:
+            st.warning(f"{msg}\n\n*(this warning fired {count} times)*")
+        else:
+            st.warning(msg)
 
 
 # ---------------------------------------------------------------------------
@@ -240,17 +298,24 @@ def render_multi() -> None:
             else:
                 AA, b = build_q7_tensor(n=int(n), m=int(m), rng_seed=42)
                 source_tag = f"Q7 default (n={int(n)}, m={int(m)}, rng=42)"
+            caught_warnings = []
             try:
-                u, nit, hal, history = multi(
-                    AA, b, int(m), float(tol), record_history=True
-                )
+                with _capture_algorithm_warnings() as caught:
+                    u, nit, hal, history = multi(
+                        AA, b, int(m), float(tol), record_history=True
+                    )
+                    caught_warnings = list(caught)
                 st.session_state["multi_result"] = {
                     "u": u, "nit": nit, "hal": hal, "history": history,
                     "n": int(n), "m": int(m), "tol": float(tol),
                     "source_tag": source_tag,
+                    "warnings": caught_warnings,
                 }
             except Exception as e:
-                st.session_state["multi_result"] = {"error": f"{type(e).__name__}: {e}"}
+                st.session_state["multi_result"] = {
+                    "error": f"{type(e).__name__}: {e}",
+                    "warnings": caught_warnings,
+                }
 
     with col_out:
         st.subheader("Output")
@@ -258,8 +323,10 @@ def render_multi() -> None:
         if result is None:
             st.info("Adjust inputs on the left, then press **Run multi**.")
         elif "error" in result:
+            _render_warnings(result.get("warnings"))
             st.error(f"multi failed — {result['error']}")
         else:
+            _render_warnings(result.get("warnings"))
             u = result["u"]
             nit = result["nit"]
             hal = result["hal"]
@@ -367,22 +434,29 @@ def render_honi() -> None:
             else:
                 AA, x0 = build_q7_tensor(n=int(n), m=int(m), rng_seed=42)
                 source_tag = f"Q7 default (n={int(n)}, m={int(m)}, rng=42)"
+            caught_warnings = []
             try:
-                lam, x, outer_nit, innit, outer_res, lam_hist, history = honi(
-                    AA, int(m), float(tol),
-                    linear_solver=linear_solver,
-                    maxit=int(maxit),
-                    initial_vector=x0,
-                    record_history=True,
-                )
+                with _capture_algorithm_warnings() as caught:
+                    lam, x, outer_nit, innit, outer_res, lam_hist, history = honi(
+                        AA, int(m), float(tol),
+                        linear_solver=linear_solver,
+                        maxit=int(maxit),
+                        initial_vector=x0,
+                        record_history=True,
+                    )
+                    caught_warnings = list(caught)
                 st.session_state["honi_result"] = {
                     "lam": lam, "x": x, "outer_nit": outer_nit, "innit": innit,
                     "outer_res": outer_res, "lam_hist": lam_hist, "history": history,
                     "linear_solver": linear_solver,
                     "source_tag": source_tag,
+                    "warnings": caught_warnings,
                 }
             except Exception as e:
-                st.session_state["honi_result"] = {"error": f"{type(e).__name__}: {e}"}
+                st.session_state["honi_result"] = {
+                    "error": f"{type(e).__name__}: {e}",
+                    "warnings": caught_warnings,
+                }
 
     with col_out:
         st.subheader("Output")
@@ -390,8 +464,10 @@ def render_honi() -> None:
         if result is None:
             st.info("Adjust inputs on the left, then press **Run honi**.")
         elif "error" in result:
+            _render_warnings(result.get("warnings"))
             st.error(f"honi failed — {result['error']}")
         else:
+            _render_warnings(result.get("warnings"))
             lam = result["lam"]
             x = result["x"]
             outer_nit = result["outer_nit"]
@@ -509,22 +585,29 @@ def render_nni() -> None:
             else:
                 AA, x0 = build_q7_tensor(n=int(n), m=int(m), rng_seed=42)
                 source_tag = f"Q7 default (n={int(n)}, m={int(m)}, rng=42)"
+            caught_warnings = []
             try:
-                lam_U, x, nit, lam_L, res_hist, lam_U_hist, history = nni(
-                    AA, int(m), float(tol),
-                    linear_solver=linear_solver,
-                    maxit=int(maxit),
-                    initial_vector=x0,
-                    record_history=True,
-                )
+                with _capture_algorithm_warnings() as caught:
+                    lam_U, x, nit, lam_L, res_hist, lam_U_hist, history = nni(
+                        AA, int(m), float(tol),
+                        linear_solver=linear_solver,
+                        maxit=int(maxit),
+                        initial_vector=x0,
+                        record_history=True,
+                    )
+                    caught_warnings = list(caught)
                 st.session_state["nni_result"] = {
                     "lam_U": lam_U, "lam_L": lam_L, "x": x, "nit": nit,
                     "res_hist": res_hist, "lam_U_hist": lam_U_hist,
                     "history": history, "linear_solver": linear_solver,
                     "source_tag": source_tag,
+                    "warnings": caught_warnings,
                 }
             except Exception as e:
-                st.session_state["nni_result"] = {"error": f"{type(e).__name__}: {e}"}
+                st.session_state["nni_result"] = {
+                    "error": f"{type(e).__name__}: {e}",
+                    "warnings": caught_warnings,
+                }
 
     with col_out:
         st.subheader("Output")
@@ -532,8 +615,10 @@ def render_nni() -> None:
         if result is None:
             st.info("Adjust inputs on the left, then press **Run nni**.")
         elif "error" in result:
+            _render_warnings(result.get("warnings"))
             st.error(f"nni failed — {result['error']}")
         else:
+            _render_warnings(result.get("warnings"))
             lam_U = result["lam_U"]
             lam_L = result["lam_L"]
             x = result["x"]
@@ -661,17 +746,20 @@ def render_hni_vs_nni() -> None:
             else:
                 AA, x0 = build_q7_tensor(n=int(n), m=int(m), rng_seed=42)
                 source_tag = f"Q7 default (n={int(n)}, m={int(m)}, rng=42)"
+            caught_warnings = []
             try:
-                h_lam, h_x, h_nit, h_inn, h_res, h_lam_hist, _ = honi(
-                    AA, int(m), float(tol),
-                    linear_solver=honi_solver, maxit=int(maxit),
-                    initial_vector=x0, record_history=True,
-                )
-                n_lam_U, n_x, n_nit, n_lam_L, n_res, n_lam_U_hist, n_hist = nni(
-                    AA, int(m), float(tol),
-                    linear_solver=nni_solver, maxit=int(maxit),
-                    initial_vector=x0, record_history=True,
-                )
+                with _capture_algorithm_warnings() as caught:
+                    h_lam, h_x, h_nit, h_inn, h_res, h_lam_hist, _ = honi(
+                        AA, int(m), float(tol),
+                        linear_solver=honi_solver, maxit=int(maxit),
+                        initial_vector=x0, record_history=True,
+                    )
+                    n_lam_U, n_x, n_nit, n_lam_L, n_res, n_lam_U_hist, n_hist = nni(
+                        AA, int(m), float(tol),
+                        linear_solver=nni_solver, maxit=int(maxit),
+                        initial_vector=x0, record_history=True,
+                    )
+                    caught_warnings = list(caught)
                 st.session_state["cmp_result"] = {
                     "honi": {
                         "lam": h_lam, "x": h_x, "nit": h_nit, "inn": h_inn,
@@ -686,9 +774,13 @@ def render_hni_vs_nni() -> None:
                         "solver": nni_solver,
                     },
                     "source_tag": source_tag,
+                    "warnings": caught_warnings,
                 }
             except Exception as e:
-                st.session_state["cmp_result"] = {"error": f"{type(e).__name__}: {e}"}
+                st.session_state["cmp_result"] = {
+                    "error": f"{type(e).__name__}: {e}",
+                    "warnings": caught_warnings,
+                }
 
     with col_out:
         st.subheader("Output")
@@ -699,8 +791,10 @@ def render_hni_vs_nni() -> None:
                 "to solve the same AA with both algorithms."
             )
         elif "error" in result:
+            _render_warnings(result.get("warnings"))
             st.error(f"comparison failed — {result['error']}")
         else:
+            _render_warnings(result.get("warnings"))
             h = result["honi"]
             nn = result["nni"]
             st.caption(f"Data source: {result.get('source_tag', 'Q7 default')}")
@@ -924,50 +1018,55 @@ def render_eigenvalue_compare() -> None:
             source_tag = f"Q7 default (n={int(n)}, m={int(m)}, rng=42)"
 
         runs_out = []
+        caught_warnings = []
         try:
-            for i, cfg in enumerate(runs_cfg):
-                label = (
-                    f"Run {i + 1}: {cfg['algorithm']} {cfg['solver']} "
-                    f"(tol={cfg['tol']:.0e}, maxit={cfg['maxit']})"
-                )
-                if cfg["algorithm"] == "HONI":
-                    lam, x, outer_nit, innit, res, lam_hist, history = honi(
-                        AA, int(m), cfg["tol"],
-                        linear_solver=cfg["solver"], maxit=cfg["maxit"],
-                        initial_vector=x0, record_history=True,
+            with _capture_algorithm_warnings() as caught:
+                for i, cfg in enumerate(runs_cfg):
+                    label = (
+                        f"Run {i + 1}: {cfg['algorithm']} {cfg['solver']} "
+                        f"(tol={cfg['tol']:.0e}, maxit={cfg['maxit']})"
                     )
-                    runs_out.append({
-                        "label": label, "algorithm": "HONI",
-                        "solver": cfg["solver"], "tol": cfg["tol"],
-                        "maxit": cfg["maxit"],
-                        "lam": float(lam), "x": x,
-                        "outer_nit": int(outer_nit), "inner_nit": int(innit),
-                        "res": np.asarray(res),
-                        "lam_hist": np.asarray(lam_hist),
-                    })
-                else:  # NNI
-                    (lam_U, x, nit, lam_L, res, lam_U_hist, hist_nni) = nni(
-                        AA, int(m), cfg["tol"],
-                        linear_solver=cfg["solver"], maxit=cfg["maxit"],
-                        initial_vector=x0, record_history=True,
-                    )
-                    runs_out.append({
-                        "label": label, "algorithm": "NNI",
-                        "solver": cfg["solver"], "tol": cfg["tol"],
-                        "maxit": cfg["maxit"],
-                        "lam_U": float(lam_U), "lam_L": float(lam_L), "x": x,
-                        "nit": int(nit),
-                        "res": np.asarray(res),
-                        "lam_U_hist": np.asarray(lam_U_hist),
-                        "gmres_info": hist_nni.get("gmres_info_history"),
-                    })
+                    if cfg["algorithm"] == "HONI":
+                        lam, x, outer_nit, innit, res, lam_hist, history = honi(
+                            AA, int(m), cfg["tol"],
+                            linear_solver=cfg["solver"], maxit=cfg["maxit"],
+                            initial_vector=x0, record_history=True,
+                        )
+                        runs_out.append({
+                            "label": label, "algorithm": "HONI",
+                            "solver": cfg["solver"], "tol": cfg["tol"],
+                            "maxit": cfg["maxit"],
+                            "lam": float(lam), "x": x,
+                            "outer_nit": int(outer_nit), "inner_nit": int(innit),
+                            "res": np.asarray(res),
+                            "lam_hist": np.asarray(lam_hist),
+                        })
+                    else:  # NNI
+                        (lam_U, x, nit, lam_L, res, lam_U_hist, hist_nni) = nni(
+                            AA, int(m), cfg["tol"],
+                            linear_solver=cfg["solver"], maxit=cfg["maxit"],
+                            initial_vector=x0, record_history=True,
+                        )
+                        runs_out.append({
+                            "label": label, "algorithm": "NNI",
+                            "solver": cfg["solver"], "tol": cfg["tol"],
+                            "maxit": cfg["maxit"],
+                            "lam_U": float(lam_U), "lam_L": float(lam_L), "x": x,
+                            "nit": int(nit),
+                            "res": np.asarray(res),
+                            "lam_U_hist": np.asarray(lam_U_hist),
+                            "gmres_info": hist_nni.get("gmres_info_history"),
+                        })
+                caught_warnings = list(caught)
             st.session_state["cmp_eig_results"] = {
                 "source_tag": source_tag,
                 "runs": runs_out,
+                "warnings": caught_warnings,
             }
         except Exception as e:
             st.session_state["cmp_eig_results"] = {
                 "error": f"{type(e).__name__}: {e}",
+                "warnings": caught_warnings,
             }
 
     # ------------------------- Section 4: Results ------------------------------
@@ -978,8 +1077,10 @@ def render_eigenvalue_compare() -> None:
             "**Run all configurations**."
         )
     elif "error" in results:
+        _render_warnings(results.get("warnings"))
         st.error(f"Comparison failed — {results['error']}")
     else:
+        _render_warnings(results.get("warnings"))
         st.divider()
         st.caption(f"Data source: {results['source_tag']}")
         st.subheader("Results — per run")
@@ -1151,28 +1252,33 @@ def render_multilinear_compare() -> None:
             source_tag = f"Q7 default (n={int(n)}, m={int(m)}, rng=42)"
 
         runs_out = []
+        caught_warnings = []
         try:
-            for i, cfg in enumerate(runs_cfg):
-                label = f"Run {i + 1}: Multi (tol={cfg['tol']:.0e})"
-                u, nit, hal, history = multi(
-                    AA, b, int(m), cfg["tol"], record_history=True,
-                )
-                total_hal = int(hal[: nit + 1].sum())
-                runs_out.append({
-                    "label": label,
-                    "tol": cfg["tol"],
-                    "u": u,
-                    "nit": int(nit),
-                    "total_hal": total_hal,
-                    "res": np.asarray(history["res_history"]),
-                })
+            with _capture_algorithm_warnings() as caught:
+                for i, cfg in enumerate(runs_cfg):
+                    label = f"Run {i + 1}: Multi (tol={cfg['tol']:.0e})"
+                    u, nit, hal, history = multi(
+                        AA, b, int(m), cfg["tol"], record_history=True,
+                    )
+                    total_hal = int(hal[: nit + 1].sum())
+                    runs_out.append({
+                        "label": label,
+                        "tol": cfg["tol"],
+                        "u": u,
+                        "nit": int(nit),
+                        "total_hal": total_hal,
+                        "res": np.asarray(history["res_history"]),
+                    })
+                caught_warnings = list(caught)
             st.session_state["cmp_multi_results"] = {
                 "source_tag": source_tag,
                 "runs": runs_out,
+                "warnings": caught_warnings,
             }
         except Exception as e:
             st.session_state["cmp_multi_results"] = {
                 "error": f"{type(e).__name__}: {e}",
+                "warnings": caught_warnings,
             }
 
     # ------------------------- Section 4: Results ------------------------------
@@ -1183,8 +1289,10 @@ def render_multilinear_compare() -> None:
             "**Run all configurations**."
         )
     elif "error" in results:
+        _render_warnings(results.get("warnings"))
         st.error(f"Comparison failed — {results['error']}")
     else:
+        _render_warnings(results.get("warnings"))
         st.divider()
         st.caption(f"Data source: {results['source_tag']}")
         st.subheader("Results — per run")

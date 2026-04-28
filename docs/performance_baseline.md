@@ -651,13 +651,83 @@ fallback is out of Tier 1 scope and is listed below.
   the cap shrink would directly reduce the `chit_py >= 99` signal
   that 2.3 relies on; running it before Tier 1 A is observationally
   established would be premature.
-- **Multi internal assert graceful fallback**: `Q7_small HONI_inexact`
-  fires the Multi-internal `na+nb` upper-bound assertion (line 598).
-  This was not in Tier 1 scope, but the same pattern as 2.2 and 2.3
-  could be applied: detect the violation, warn, fall back to a
-  different algorithm. Worth picking up in a future Tier 1.5 if it
-  proves a recurring pain point.
-
 Phase 2 closes here. Tier 3 candidates remain on the table for a
 later phase once the Phase 2 safety net has been observed in real
 use.
+
+### §7.6 Sub-step 2.6 — Demo UI warning capture (Day 9)
+
+The Sub-step 2.2 / 2.3 fallback notices originally surfaced only on
+stderr / Streamlit Cloud's log stream — the demo UI showed the
+recovered (correct) result with no indication that a fallback had
+fired. Sub-step 2.6 makes those notices visible to demo visitors.
+
+`algorithms.py` gains two helpers:
+
+- `_capture_algorithm_warnings()` — context manager that wraps each
+  algorithm call in `warnings.catch_warnings(record=True)` and yields
+  the captured list to the caller. Stashed in `st.session_state`
+  under a `"warnings"` key.
+- `_render_warnings(warning_records)` — displays each captured
+  warning as `st.warning`. Identical messages are deduplicated and
+  shown once with a "(this warning fired N times)" suffix; this is
+  what keeps the UI clean when Sub-step 2.7's `Q7_small HONI_inexact`
+  path emits ~189 Multi residual warnings collapsed into a single
+  notice with the count.
+
+All six renderers (`render_multi`, `render_honi`, `render_nni`,
+`render_hni_vs_nni`, `render_eigenvalue_compare`,
+`render_multilinear_compare`) follow the same pattern: wrap the
+algorithm call(s) in `with _capture_algorithm_warnings() as caught`,
+stash `list(caught)` in session_state, and call
+`_render_warnings(result.get("warnings"))` near the top of the
+output column. Healthy cases (zero warnings) render nothing — the UI
+stays clean.
+
+### §7.7 Sub-step 2.7 — Multi internal assert + HONI inexact graceful fallback (Day 9)
+
+The last `⛔` row in §7.4 was `Q7_small HONI_inexact`, which raised
+`AssertionError` from inside Multi (`tensor_utils.py:598`) before
+HONI's outer loop had a chance to run. Sub-step 2.7 takes this from
+crash to recovered output.
+
+**(c) Multi `graceful` keyword-only kwarg**. The bare assert at
+line 598 becomes:
+
+```python
+upper_bound_violated = bool(np.any(res[:nit + 1] > na + nb + 1e-10))
+if upper_bound_violated and graceful:
+    warnings.warn(...)
+else:
+    assert ...   # original parity-safe assert kept for graceful=False
+```
+
+Default `graceful=False` keeps standalone Multi and the parity tests
+bit-identical to Phase 1. HONI passes `graceful=True` at both inner
+multi() call sites (`record_inner_history` True / False branches).
+
+**(d.1) HONI inexact graceful fallback**. With Multi no longer
+crashing, Q7_small HONI_inexact ran its outer loop to maxit=200 and
+then tripped HONI's own residual upper-bound assert (line 1056,
+`res > 1.0`). Sub-step 2.7 mirrors Sub-step 2.3 for the inexact
+branch: when the violation fires while `linear_solver == "inexact"`,
+warn and fall back to NNI canonical via the existing
+`_honi_fallback_to_nni` helper. The exact branch keeps its bare
+assert because Sub-step 2.3's detection-based fallback already
+covers it; reaching the assert on exact would mean something
+genuinely unexpected occurred and surfacing the error is correct.
+
+**Stacked fallback chain on Q7_small**: HONI inexact → NNI canonical
+→ NNI_ha. All three layers fire warnings (HONI inexact's, NNI
+canonical's from Sub-step 2.2, plus 189 Multi graceful warnings from
+the inner Multi calls). The 189 Multi warnings come in three
+distinct text variants (`max res = 2.130e+10`, `2.636e+10`,
+`2.637e+10` — different residual scales per Multi call); after
+Sub-step 2.6's dedup the user sees five notices total, not 191. The
+final result is `λ ≈ 10.756224`, matching the explicit
+`halving=True` baseline from Phase 1 §1.3 D3.
+
+**Effect on the §7.4 benchmark snapshot**: the previously `⛔`
+`Q7_small HONI_inexact` row is now `✓ nit=199 / 2344 ms /
+λ=10.756224`. All 20 entries in the 5-case × 4-algorithm grid
+return a usable answer.
