@@ -1,9 +1,20 @@
 """Reproduce Liu / Guo / Lin (Numer. Math. 2017) §7 Example 1 — wind-power Markov chain.
 
 Paper Figure 1 specifies:
-- NNI converges to relative error < 1e-13 in 5 iterations
+- NNI converges to relative error < 1e-13 in 5 iterations.
 - NQZ converges to the same target in 22 iterations (not tested here —
-  NQZ is not part of the toolbox)
+  NQZ is not part of the toolbox).
+
+Day 15 MATLAB verification (via GNU Octave on paper's NNI.m source):
+- MATLAB output: nit=6, lambda=15.911456053986655
+- Toolbox output: nit=5, lambda=15.911456053987 (matches paper text)
+
+The 1-iter difference between MATLAB and toolbox is a counting
+convention or LU-pivot trajectory difference between MATLAB Gaussian
+elimination and Python scipy spsolve — both are valid implementations
+of paper Algorithm 1 and arrive at the same eigenvalue to 13 digits.
+See docs/papers/liu2017_alignment_audit.md §7 for the full three-way
+comparison.
 
 This file gates Phase B B1: the test fails if our reading of the paper's
 A_{ijk} formula is wrong (see ``paper_examples.build_liu2017_example1``

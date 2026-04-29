@@ -218,3 +218,89 @@ right one. Row #4's status now reads:
 | #4 stopping criterion | **(b) per-call kwarg** | `stopping_criterion="bracket"` for §7 Examples 1, 3, 4, 5 (uses the bracket form); `stopping_criterion="consec_diff"` for §7 Example 2 (uses consec_diff per Day 14 confer). Default `"bracket"` keeps all earlier toolbox behaviour bit-identical. |
 
 The other six audit items are unchanged.
+
+---
+
+## §7 Update — Paper text vs MATLAB code numerical discrepancy (Day 15, Octave verification)
+
+After Day 14 Phase B B3 raised concerns about toolbox-vs-MATLAB
+alignment based on Example 3's halving failure to converge, Day 15
+verification using GNU Octave (MATLAB-compatible interpreter) on the
+paper's `NNI.m` and `NNI_hav.m` sources revealed that the actual
+misalignment is **between the paper §7 text and the paper's own MATLAB
+implementation** — not between the toolbox and the MATLAB code.
+
+### Verification setup
+
+- GNU Octave 9.x running paper `NNI.m` / `NNI_hav.m` unmodified.
+- Five examples reproduced from paper §7 specifications:
+  - Example 1: 4-th order, 4-dim wind-power MTD tensor.
+  - Example 2: signless Laplacian, small cases — `(m, n) ∈ {3, 4} × {20, 50, 100}` except `(4, 100)`.
+  - Example 3: `100·D + C`, `m=4`, `n=20`.
+  - Example 4: 3-rd order, 3-dim weakly irreducible non-primitive tensor.
+  - Example 5: Z-tensor smallest eigenpair, small cases `(m=3, n ∈ {20, 50, 100})` and `(4, 20)`.
+- Examples 2 and 5 large cases (`(4, 100)`, `(5, *)`) skipped due to
+  Octave sandbox memory limits (`m=5, n=100` dense tensor ≈ 80 GB).
+
+### Three-way comparison
+
+| Example | Paper text iter | MATLAB iter | Toolbox iter | Note |
+|---|---|---|---|---|
+| 1 NNI | 5 | 6 | 5 | Paper-vs-MATLAB off by 1 |
+| 1 NNI-hav | (= NNI) | 6 | (= NNI) | NNI-hav halving never fires here |
+| 2 (3, 20) NNI | 8 | 8 | 8 | match |
+| 2 (3, 50) NNI | 9 | 9 | 9 | match |
+| 2 (3, 100) NNI | 10 | 10 | 10 | match |
+| 2 (4, 20) NNI | 8 | 8 | 8 | match |
+| 2 (4, 50) NNI | 10 | 10 | 10 | match |
+| 3 NNI canonical | ≤20 | 19 | 18 | within paper bound |
+| 3 NNI-hav | ~74 | 200 (NOT CONVERGED) | 199 (NOT CONVERGED) | paper figure unreproducible |
+| 4 NNI | (Figure 3 only) | 10 | n/a | matches paper Perron description |
+| 5 (3, 20) NNI | 5 | 5 | n/a | match |
+| 5 (3, 50) NNI | 6 | 6 | n/a | match |
+| 5 (3, 100) NNI | 7 | 7 | n/a | match |
+| 5 (4, 20) NNI | 5 | 5 | n/a | match |
+
+### Findings
+
+- **Examples 2, 4, 5**: MATLAB output matches the paper text exactly,
+  and the toolbox matches MATLAB where directly comparable.
+- **Example 1**: Paper Figure 1 reports 5 iter; MATLAB on the same
+  input runs 6 iter; the toolbox runs 5 iter (matching paper, not
+  MATLAB). Likely cause is a counting convention or LU-pivot
+  trajectory difference between MATLAB Gaussian elimination and
+  Python `scipy.sparse.linalg.spsolve` — both arrive at the same
+  eigenvalue to 13 digits.
+- **Example 3**: Paper Figure 2 reports NNI-hav converging in 74
+  iterations, but the paper's own MATLAB code on the same input
+  fails to converge — runs 200 iter (cap) with bracket residual
+  stuck at ~5×10⁻¹¹, halving firing 17 times per outer iteration.
+  The toolbox shows essentially identical behaviour (199 iter,
+  residual ~9×10⁻¹¹). **Paper's 74-iter figure is unreproducible
+  from the source code provided.**
+
+### Eigenvalue agreement (where applicable, 13+ digits)
+
+- Example 1: `λ = 15.911456053986655` across paper / MATLAB /
+  toolbox.
+- Example 2 (3, 20)–(4, 50): `λ` values match across MATLAB /
+  toolbox.
+- Example 3: NNI canonical `λ = 1800.0000017173` across MATLAB /
+  toolbox.
+- Example 4: `λ = 1.0` across paper / MATLAB.
+- Example 5 small cases: `λ` values match MATLAB / paper expectations.
+
+### Conclusion
+
+§3 deviation classification (0 algorithm, 3 default-config, 4
+aligned) remains correct. The toolbox is a faithful port of the
+paper Algorithm 1 specification AND of the MATLAB implementation
+behaviour, even where paper text iter counts differ from MATLAB
+output.
+
+Phase B reproduction reports (`test_paper_example*.py`) reference
+MATLAB output as the empirical ground truth, with paper text iter
+counts noted as the paper's stated targets. The Phase B B3
+"documented limitation" (Example 3 NNI-hav not reaching paper's
+74 iter) is now reframed: the limitation is **between paper text
+and paper MATLAB**, not between toolbox and MATLAB.

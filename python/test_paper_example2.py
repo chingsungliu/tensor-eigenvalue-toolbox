@@ -21,6 +21,17 @@ trajectory is non-monotone in the noise floor (iter 12 lower than
 iter 13), so no single tol can reach paper's `nit=13` exactly. We use
 `tol = 2e-16` which gives `nit=12` (within `ALLOWED_NIT_DIFF=1`).
 
+Day 15 MATLAB verification: GNU Octave running paper NNI.m on the same
+hypergraph construction reproduces paper Table 1 strictly with default
+bracket stopping for the small cases tested ((m, n) ∈ {3, 4} × {20, 50,
+100} except (4, 100), which exceeds Octave sandbox memory). All five
+small cases match paper iter counts at tol=1e-13. The toolbox's need
+for ``stopping_criterion="consec_diff"`` and per-case tol arises from
+Python scipy spsolve's LU-pivot trajectories diverging slightly from
+MATLAB Gaussian elimination in the noise floor — both implementations
+reach the same eigenvalue. See docs/papers/liu2017_alignment_audit.md
+§7 for the three-way comparison.
+
 Run::
 
     .venv/bin/python test_paper_example2.py

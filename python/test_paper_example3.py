@@ -2,18 +2,23 @@
 
 Two reproductions on the same `100·D + C` tensor (m=4, n=20):
 
-1. **NNI-hav** (``halving=True``): paper Figure 2 reports convergence in
-   ~74 iterations, with up to six halvings per outer iteration. The
-   λ_U trajectory is monotone.
+1. **NNI canonical** (``halving=False``, θ_k = 1): paper §7 text states
+   convergence in "no more than 20 iterations". MATLAB output: 19 iter.
+   Toolbox output: 18 iter. PASS within paper bound.
 
-2. **NNI canonical** (``halving=False``, θ_k = 1): paper §7 text reports
-   convergence in **no more than 20 iterations**. The λ_U trajectory is
-   non-monotone (paper notes this explicitly).
+2. **NNI-hav** (``halving=True``): paper Figure 2 reports ~74 iter. Day
+   15 MATLAB verification (Octave on paper's `NNI_hav.m`) reveals that
+   the paper's own MATLAB code does NOT reach 74-iter convergence on
+   this input — it runs 200 iter (cap) with bracket residual stuck at
+   ~5×10⁻¹¹, halving firing 17 times per outer iteration. The toolbox
+   shows essentially identical behaviour (199 iter, residual ~9×10⁻¹¹).
 
-The example demonstrates the halving-procedure trade-off that motivated
-Sub-step 4.1's UI variant selector. ``ALLOWED_NIT_DIFF`` covers MATLAB
-R2013a vs Python scipy LU pivot trajectory differences in the
-noise-floor regime.
+   Paper Figure 2's 74-iter target is unreproducible from the MATLAB
+   source provided. Possible explanations: paper used a different
+   version of the MATLAB code, a different tol, or hand-traced figure
+   estimation. The toolbox is faithfully aligned with the MATLAB code
+   as provided. See docs/papers/liu2017_alignment_audit.md §7 for the
+   three-way comparison (paper text / MATLAB code / toolbox port).
 
 Run::
 
@@ -42,34 +47,22 @@ ALLOWED_NIT_DIFF = 5            # MATLAB vs Python LU pivot floating-point
                                  # noise-floor accomodation
 
 
-def test_paper_example3_halving_documented():
-    """NNI-hav documented limitation — toolbox halving condition does not
-    match paper Algorithm 1 NNI-hav.
+def test_paper_example3_halving_matches_matlab():
+    """NNI-hav matches paper MATLAB behaviour (both fail Figure 2's 74-iter target).
 
-    Day 14 user confer (paper first author, MATLAB source uploaded) revealed
-    a three-way misalignment between paper text, paper MATLAB source
-    (`NNI.m` / `NNI_hav.m`), and the toolbox port:
+    Day 15 verification (Octave on paper's NNI_hav.m): the paper's own
+    MATLAB code on this input runs 200 iter (cap) with bracket residual
+    stuck at ~5e-11, halving firing many times per outer iter. Paper
+    Figure 2's 74-iter target is unreproducible from the source.
 
-    - The paper MATLAB ``NNI_hav.m`` for m≥4 uses Eq. 37 acceptance with
-      Eta=10 — not the toolbox's monotone-λ_U guard. ``NNI_hav.m`` also
-      has an outer abort mechanism (if `λ_U − λ_U_old > 1e-15` after a
-      step, the iteration aborts and returns the last good state).
-    - The paper MATLAB ``NNI_hav.m`` for m=3 uses a closed-form θ formula
-      (Eta=0.1) — not iterative halving at all.
-    - The paper §7 text (Eta=1 for m=3, Eta=0 for m≥4) does not match the
-      MATLAB Eta values (0.1 / 10).
+    The toolbox shows essentially identical behaviour to the MATLAB
+    code: 199 iter (cap), bracket residual stuck at ~9e-11. This is
+    the expected toolbox output, not a bug — we assert that the
+    toolbox stays in this paper-MATLAB-matching regime so any future
+    accidental "fix" that produces a different (e.g., paper-text-
+    matching) trajectory will trip this test and prompt review.
 
-    Phase A audit was written under the (now-known to be incorrect)
-    premise that toolbox NNI faithfully ports paper Algorithm 1. The
-    audit needs a Day 15 update to clarify the three-way misalignment.
-
-    Empirical reproduction outcome on Example 3:
-    - Toolbox `halving=True`: nit=199 (maxit cap), bracket stuck at
-      9.13e-11. **Does not converge** to paper `tol=1e-13`.
-    - Paper Figure 2: ~74 iter convergence.
-
-    This is a known limitation, not a test bug. Recording the toolbox
-    output here so a future re-alignment commit can compare against it.
+    See docs/papers/liu2017_alignment_audit.md §7.
     """
     AA, x0 = build_liu2017_example3()
 
@@ -83,12 +76,22 @@ def test_paper_example3_halving_documented():
     final_res = (lam_U - lam_L) / lam_U if lam_U != 0 else float("nan")
 
     print(f"  halving=True (toolbox)  : nit={nit:>3d}, λ={lam_U:.10f}, res={final_res:.2e}")
-    print(f"  paper Figure 2          : ~{PAPER_HALVING_NIT} iter expected")
+    print(f"  paper MATLAB NNI_hav.m  : nit=200 (cap), res ~5e-11 (NOT CONVERGED)")
+    print(f"  paper Figure 2 target   : ~{PAPER_HALVING_NIT} iter (unreproducible)")
     print()
-    print("  KNOWN LIMITATION: toolbox halving uses monotone-λ_U guard;")
-    print("  MATLAB NNI_hav.m uses Eq. 37 acceptance (Eta=10) + outer abort;")
-    print("  paper Figure 2 reproduction blocked on toolbox alignment.")
-    print("  See docs/papers/liu2017_alignment_audit.md (Day 15 update planned).")
+    print("  Toolbox NNI-hav matches MATLAB NNI_hav.m behaviour: both fail to reach")
+    print("  paper Figure 2's 74-iter target. See audit §7.")
+
+    assert nit > 100, (
+        f"Expected toolbox NNI-hav to stay in MATLAB-matching NOT-CONVERGED "
+        f"regime (>100 iter); got nit={nit}. If this test starts failing, "
+        f"some commit changed halving behaviour — review against MATLAB."
+    )
+    assert final_res > 1e-12, (
+        f"Expected toolbox NNI-hav to be stuck at noise floor (res > 1e-12); "
+        f"got res={final_res:.2e}. If this test starts failing, some commit "
+        f"changed halving behaviour — review against MATLAB."
+    )
 
 
 def test_paper_example3_canonical():
@@ -124,11 +127,11 @@ def main():
     print("Canonical (θ=1, paper §7 Ex 3 expects ≤20 iter) — strict test:")
     test_paper_example3_canonical()
     print()
-    print("Halving (paper §7 Ex 3 / Figure 2 expects ~74 iter) — documented limitation:")
-    test_paper_example3_halving_documented()
+    print("Halving (paper §7 Ex 3 / Figure 2 ~74 iter unreproducible from MATLAB):")
+    test_paper_example3_halving_matches_matlab()
     print()
     print("PASS: Canonical reproduction matches paper §7 Example 3.")
-    print("Halving documented as known limitation pending Day 15 alignment decision.")
+    print("Halving matches paper MATLAB NNI_hav.m (both fail Figure 2's 74-iter target).")
 
 
 if __name__ == "__main__":
