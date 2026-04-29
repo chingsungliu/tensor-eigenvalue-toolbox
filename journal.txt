@@ -198,3 +198,54 @@ Day 10 entry options (user to decide):
   or Multi halving cap shrinking inside HONI inexact (Candidate B)
 - Different direction: paper writing, NLS/NCP extension, productize,
   etc.
+
+
+Day 11 (2026-04-30): NNI performance + m>=3 scope. 2 commits.
+------------------------------------------------------------
+
+Sub-step 3.1 (Linear solver benchmark, Day 10): NNI gmres vs spsolve
+benchmarked. gmres 6-554x slower across 5 cases, Q7_seed_alt2 diverged
+to overflow. Solver replacement route abandoned.
+
+Sub-step 3.2 (Fine-grained nni.linear_solve profiling, Day 10):
+Splits parent into 6 sub-categories. jacobian_build = 71-79% of parent
+across all 3 measured cases. Located the actual bottleneck.
+
+Sub-step 3.3 (A4 vectorized sp_Jaco_Ax rewrite, Day 11): Replaces
+p-iteration scipy.sparse.kron loop with direct CSR construction
+(assemble COO triples from AA's CSR storage in vectorized numpy ops).
+Mathematics unchanged.
+
+Performance results:
+- NNI: 2.6-3.2x speedup across all 5 cases (Q7_baseline 39 -> 12 ms)
+- Side benefit (sp_Jaco_Ax also called by Multi/HONI):
+  - Multi: 3.8x speedup
+  - HONI exact: 2.0x speedup
+  - HONI inexact: 2.6x speedup
+  - HONI inexact Q7_large: 24 s -> 13 s (largest absolute gain)
+
+Sub-step 3.5 (m>=3 scope enforcement, Day 11 evening):
+User reported NNI / m=2 NaN crash. Decision: don't fix m=2, enforce
+scope instead. Defense in depth at three layers:
+- Algorithm: nni/honi/multi raise ValueError when m<3 with informative
+  message pointing to scipy.sparse.linalg.eigs / numpy.linalg.eig
+- Demo UI: 6 algorithm renderers set m slider min_value=3
+- README: scope section states m>=3 explicitly
+sp_Jaco_Ax retains m=1/m=2 fast paths (utility function, stateless).
+
+Verification: 7 stages all pass throughout (4 MATLAB parity +
+sp_Jaco_Ax parity + sp_Jaco_Ax unit + profiling parity).
+
+Commits: a326117 (Sub-step 3.1+3.2+3.3), 5a80c4d (Sub-step 3.5).
+Demo: csliu-toolbox.streamlit.app, sidebar shows 5a80c4d, all 6 tabs
+have m slider min=3, NNI runs at new performance.
+
+Memory state: 12 fragility memories.
+
+Day 12 entry options (user to decide):
+- Sub-step 4.1 onwards: NNI stability line (diagnose Q7_small NNI_ha
+  not converging, B1-B4 candidates from earlier analysis)
+- Tier 3 B (Multi halving cap shrinking inside HONI inexact):
+  Phase 2 Tier 3 deferred candidate
+- Different direction: paper writing, NLS/NCP extension, productize,
+  research notes LaTeX/PDF, etc.
