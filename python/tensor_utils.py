@@ -1190,6 +1190,7 @@ def nni(
     tol_theta=1e-12,
     maxit=200,
     initial_vector=None,
+    stopping_criterion="bracket",
     record_history=False,
     plot_res=False,
     matlab_compat=False,
@@ -1349,6 +1350,11 @@ def nni(
         raise ValueError(
             f"linear_solver must be 'spsolve' or 'gmres', got {linear_solver!r}"
         )
+    if stopping_criterion not in ("bracket", "consec_diff"):
+        raise ValueError(
+            f"stopping_criterion must be 'bracket' or 'consec_diff', "
+            f"got {stopping_criterion!r}"
+        )
     if not isinstance(m, (int, np.integer)):
         raise ValueError(f"m must be int, got {type(m).__name__}")
     m = int(m)
@@ -1462,7 +1468,31 @@ def nni(
     _MAX_NIT = maxit - 1  # Python 0-based; MATLAB `nit < maxit` ≡ Python `nit < maxit - 1`
 
     # ---- 外層 Newton 迴圈 (NNI.m line 42-75) ----
-    while np.min(res) > tol and nit < _MAX_NIT:
+    # Sub-step Phase B B2 (Day 14): stopping_criterion controls outer-loop
+    # convergence test.
+    #   "bracket"     — np.min(res) <= tol where res = (λ_U − λ_L) / λ_U.
+    #                   Mirrors MATLAB NNI.m / NNI_ha.m. Default; bit-identical
+    #                   behaviour to all earlier sub-steps and parity tests.
+    #   "consec_diff" — |λ_U[k] − λ_U[k-1]| / |λ_U[k]| ≤ tol. Used by paper
+    #                   §7 Example 2 (Liu/Guo/Lin 2017 Table 1). Subtly
+    #                   different from bracket near the numerical noise
+    #                   floor; see docs/papers/liu2017_alignment_audit.md §6.
+    while True:
+        if nit >= _MAX_NIT:
+            break
+        if stopping_criterion == "bracket":
+            if np.min(res) <= tol:
+                break
+        else:  # "consec_diff"
+            if nit >= 1:
+                denom = abs(lambda_U)
+                if denom == 0.0:
+                    break  # degenerate; nothing meaningful to converge to
+                consec = abs(lambda_U - lambda_U_history[nit - 1]) / denom
+                if consec <= tol:
+                    break
+            # nit == 0: always run at least one update to make
+            # |λ_k − λ_{k-1}| meaningful.
         nit += 1                                                                  # line 43
 
         # Jacobian + shifted matrix (NNI.m line 44, 46)

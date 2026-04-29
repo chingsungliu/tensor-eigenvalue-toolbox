@@ -21,6 +21,11 @@ from __future__ import annotations
 from typing import Tuple
 
 import numpy as np
+from scipy.sparse import csr_matrix
+
+from streamlit_app.problems.tensor_eigenvalue.hypergraph_utils import (
+    build_signless_laplacian,
+)
 
 
 def build_liu2017_example1() -> Tuple[np.ndarray, np.ndarray, int]:
@@ -90,3 +95,39 @@ def build_liu2017_example1() -> Tuple[np.ndarray, np.ndarray, int]:
     x0 = np.ones(n) / np.sqrt(n)
     m = 4
     return A, x0, m
+
+
+def build_liu2017_example2(m: int, n: int) -> Tuple[csr_matrix, np.ndarray]:
+    """Liu / Guo / Lin (Numer. Math. 2017) §7 Example 2 — signless Laplacian
+    of an m-uniform hypergraph.
+
+    The paper's Table 1 reports NNI iteration counts for the signless
+    Laplacian ``A = D + C`` on the m-uniform connected hypergraph with
+
+        E = {(i, j, j+1, …, j+m-2) : i ∈ {1,2,3}, j ∈ {i+1, …, n-m+2}}
+
+    (paper §7 Example 2; 1-indexed in print). ``D`` is the diagonal
+    degree tensor and ``C`` is the Cooper-Dutle (2012) adjacency tensor
+    with `C[σ(e)] = 1/(m-1)!` over all permutations of each edge.
+
+    The tensor is returned as a sparse mode-1 unfolding of shape
+    `(n, n^(m-1))` (dense storage would be `n^m`, infeasible for the
+    m=5 / n=100 case in paper Table 1 — `10^10` entries).
+
+    Parameters
+    ----------
+    m : int
+        Tensor order. Paper Table 1 tests m ∈ {3, 4, 5}.
+    n : int
+        Dimension. Paper Table 1 tests n ∈ {20, 50, 100}.
+
+    Returns
+    -------
+    AA : scipy.sparse.csr_matrix, shape (n, n**(m-1))
+        Mode-1 unfolding of the signless Laplacian tensor.
+    x0 : np.ndarray, shape (n,)
+        Paper §7 default initial vector ``(1/√n) · 1``.
+    """
+    AA = build_signless_laplacian(m, n)
+    x0 = np.ones(n) / np.sqrt(n)
+    return AA, x0

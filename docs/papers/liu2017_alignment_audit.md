@@ -166,3 +166,55 @@ Algorithm 1 are reachable in the toolbox today
 with `h(θ) > 0` element-wise acceptance). Sub-step 4.1 already
 exposes the variant choice in the demo. The five-example
 reproduction can begin.
+
+---
+
+## §6 Update — Stopping criterion (Day 14 Phase B B2 confer)
+
+The original Phase A audit treated the stopping criterion as fully
+aligned (see §2 row #4 — "formula match; default tol off by one
+decade"). Phase B B2's reproduction of paper §7 Example 2 Table 1
+revealed that paper §7 Example 2 actually uses a different criterion
+than the bracket form stated in the §7 introductory text.
+
+**User confer outcome (paper first author, Day 14)**:
+- **Q1** Stopping criterion for paper §7 Example 2 is `consec_diff`:
+  `|λ_k − λ_{k-1}| / |λ_k| ≤ tol` — not the bracket form
+  `(λ_U − λ_L) / λ_U ≤ tol` from §7's introductory text.
+- **Q2** Tol is nominally 1e-13 but is relaxed when machine
+  precision prevents the consec_diff trajectory from reaching that
+  level cleanly (the noise floor sits at ~1e-15 and `consec_diff`
+  can trip ε-jitter that bracket would not).
+- **Q3** The paper computations were on MATLAB; floating-point
+  trajectories in the noise floor can differ from Python / scipy
+  by ~1 iteration through LU pivot order alone.
+- **Q4** Different paper examples / cases use different tol values.
+  Example 2's large-n cases (notably `m=4, n=100`) relax tol to keep
+  consec_diff from stopping prematurely on a noise-floor sample.
+
+**Implementation** (commit pending Day 14):
+- `nni()` gains a keyword-only `stopping_criterion` argument with
+  values `"bracket"` (default — preserves all earlier behaviour
+  including the seven parity tests bit-identical to MATLAB) and
+  `"consec_diff"` (paper §7 Example 2). Docstring entry updated
+  to point at this audit §6.
+- Phase B B2 test (`test_paper_example2.py`) uses
+  `stopping_criterion="consec_diff"` with per-case tol from a
+  trajectory dump. Eight cases match paper Table 1 exactly; the
+  remaining `(m=4, n=100)` case is `nit=12` against paper's
+  `nit=13`. The `(4, 100)` consec_diff trajectory is non-monotone
+  in the noise floor (iter 12 lower than iter 13), so no single
+  tol can produce paper's exact iter count — `ALLOWED_NIT_DIFF=1`
+  is documented in the test.
+
+**Effect on §3 classification**: row #4 (convergence formula)
+shifts from a clean (b) "default deviation" to a more nuanced
+"the criterion choice itself depends on the example". The kwarg
+exposes both criteria so paper-reproduction tests can pick the
+right one. Row #4's status now reads:
+
+| Item | Class | Note |
+|---|---|---|
+| #4 stopping criterion | **(b) per-call kwarg** | `stopping_criterion="bracket"` for §7 Examples 1, 3, 4, 5 (uses the bracket form); `stopping_criterion="consec_diff"` for §7 Example 2 (uses consec_diff per Day 14 confer). Default `"bracket"` keeps all earlier toolbox behaviour bit-identical. |
+
+The other six audit items are unchanged.
