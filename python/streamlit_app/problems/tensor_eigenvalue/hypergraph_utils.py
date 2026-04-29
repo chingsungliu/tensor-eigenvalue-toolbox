@@ -47,9 +47,12 @@ def build_paper_edge_set(m: int, n: int) -> List[Tuple[int, ...]]:
     return edges
 
 
-def build_signless_laplacian(m: int, n: int) -> csr_matrix:
-    """Build the m-th order n-dim signless Laplacian tensor `A = D + C`,
-    return its mode-1 unfolding as a CSR matrix of shape `(n, n^(m-1))`.
+def build_signless_laplacian(
+    m: int, n: int, *, diagonal_coeff: float = 1.0
+) -> csr_matrix:
+    """Build the m-th order n-dim signless Laplacian tensor
+    `A = diagonal_coeff · D + C`, return its mode-1 unfolding as a CSR
+    matrix of shape `(n, n^(m-1))`.
 
     Column-major unfolding (consistent with `tenpow` / `tpv` /
     `sp_Jaco_Ax` in the toolbox): column index for tensor entry
@@ -60,6 +63,18 @@ def build_signless_laplacian(m: int, n: int) -> csr_matrix:
     Uses `csr_matrix((data, (rows, cols)), ...)` constructor, which sums
     duplicate (row, col) pairs — natural for the adjacency contributions
     that may overlap across permutations of different edges.
+
+    Parameters
+    ----------
+    m, n : int
+        Tensor order and dimension. The paper edge set requires `n >= m`.
+    diagonal_coeff : float, default 1.0
+        Multiplier on the diagonal degree tensor. Default `1.0` reproduces
+        the standard signless Laplacian `A = D + C` used by paper §7
+        Example 2 / Table 1. Paper §7 Example 3 uses `diagonal_coeff=100`
+        to amplify D so the spectral structure is dominated by the
+        diagonal — that is the regime where the halving procedure fires
+        actively (paper Figure 2).
     """
     if m < 3:
         # Out of scope for tensor eigenvalue (Sub-step 3.5 enforces m≥3 at
@@ -86,14 +101,14 @@ def build_signless_laplacian(m: int, n: int) -> csr_matrix:
     cols: List[int] = []
     vals: List[float] = []
 
-    # Diagonal D: D[v, v, ..., v] = deg(v).
+    # Diagonal D: D[v, v, ..., v] = deg(v) (scaled by diagonal_coeff).
     # Column index for (v, v, ..., v) under column-major unfolding:
     # c = v · (1 + n + n² + ... + n^(m-2)).
     col_factor = sum(n ** k for k in range(m - 1))
     for v in range(n):
         rows.append(v)
         cols.append(v * col_factor)
-        vals.append(float(degrees[v]))
+        vals.append(diagonal_coeff * float(degrees[v]))
 
     # Adjacency C: each edge e contributes `1/(m-1)!` to every permutation
     # of e (m! permutations per edge).

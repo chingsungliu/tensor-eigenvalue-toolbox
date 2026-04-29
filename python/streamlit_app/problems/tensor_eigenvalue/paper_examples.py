@@ -131,3 +131,37 @@ def build_liu2017_example2(m: int, n: int) -> Tuple[csr_matrix, np.ndarray]:
     AA = build_signless_laplacian(m, n)
     x0 = np.ones(n) / np.sqrt(n)
     return AA, x0
+
+
+def build_liu2017_example3() -> Tuple[csr_matrix, np.ndarray]:
+    """Liu / Guo / Lin (Numer. Math. 2017) §7 Example 3 — halving demonstration.
+
+    Same edge set as Example 2 at `m=4, n=20`, but with the diagonal
+    degree tensor amplified by 100×: `A = 100·D + C`. The amplification
+    pushes the spectral structure into a regime where the halving
+    procedure (NNI-hav, `halving=True`) is most actively triggered.
+
+    Paper Figure 2 reports two trajectories on this case:
+
+    - ``halving=True`` (NNI-hav): convergence in **74 outer iterations**,
+      with up to six halvings per iter to satisfy the acceptance
+      condition (37). Trajectory is monotone in λ_U.
+    - ``halving=False`` (canonical, θ_k = 1): convergence in **no more
+      than 20 outer iterations**, but the λ_U trajectory is
+      non-monotone.
+
+    The example is the demo motivating Sub-step 4.1's UI variant
+    selector — both halving and canonical are first-class options
+    here, with paper-explicit trade-off labels.
+
+    Returns
+    -------
+    AA : scipy.sparse.csr_matrix, shape (20, 20**3)
+        Mode-1 unfolding of `100·D + C` for the Example 2 edge set
+        with `m=4, n=20`.
+    x0 : np.ndarray, shape (20,)
+        Paper §7 default initial vector `(1/√n) · 1`.
+    """
+    AA = build_signless_laplacian(m=4, n=20, diagonal_coeff=100.0)
+    x0 = np.ones(20) / np.sqrt(20)
+    return AA, x0
