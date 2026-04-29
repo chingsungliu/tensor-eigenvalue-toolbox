@@ -567,6 +567,24 @@ def render_nni() -> None:
                 help="spsolve = MATLAB-parity 路徑（LU direct）；"
                      "gmres = Python-only 大 sparse 路徑（iterative、預設 maxit=1000 tol=1e-10 restart=20）",
             )
+            nni_variant = st.radio(
+                "NNI variant",
+                options=["canonical", "halving"],
+                format_func=lambda v: {
+                    "canonical": "canonical (faster)",
+                    "halving": "halving (more stable)",
+                }[v],
+                index=0,
+                help=(
+                    "canonical: full Newton step (NNI.m). Faster on healthy "
+                    "M-tensors but may hit the residual upper-bound assertion "
+                    "on small / ill-conditioned cases (then auto-falls back "
+                    "to halving). halving: with halving line search "
+                    "(NNI_ha.m). More robust on edge cases at the cost of "
+                    "speed."
+                ),
+            )
+            halving_flag = nni_variant == "halving"
             submitted = st.form_submit_button(
                 "Run nni",
                 type="primary",
@@ -593,6 +611,7 @@ def render_nni() -> None:
                         linear_solver=linear_solver,
                         maxit=int(maxit),
                         initial_vector=x0,
+                        halving=halving_flag,
                         record_history=True,
                     )
                     caught_warnings = list(caught)

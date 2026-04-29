@@ -1264,3 +1264,89 @@ constraint by tripping over it.
 - Sub-step 3.3's `sp_Jaco_Ax` unit tests still pass — they
   intentionally cover `m=1` and `m=2` to keep `sp_Jaco_Ax`'s
   utility-function contract intact.
+
+---
+
+## §12 Sub-step 4.1 — Expose NNI halving variant in demo (Day 12)
+
+Sub-step 2.2 introduced the canonical → halving auto-fallback chain
+inside `nni()`. The demo's NNI button has been calling
+`nni(halving=False)` since Day 4, making `NNI_ha` (halving=True)
+reachable only through the fallback path. User feedback:
+`NNI_ha` should be a first-class option for direct comparison.
+
+### §12.1 UI change
+
+`render_nni()` in `algorithms.py` adds a radio widget
+"NNI variant":
+
+- `canonical (faster)` — `halving=False`, default
+- `halving (more stable)` — `halving=True`
+
+The `format_func` keeps the internal value as the bare string
+(`"canonical"` / `"halving"`) while the UI label carries the
+trade-off hint. `help` text describes the trade-off observed in
+Phase 1 §1.3 D3:
+
+- `canonical` is 1.4–14.5× faster on healthy M-tensors but hits
+  the residual upper-bound assertion on ill-conditioned cases
+  (e.g. Q7_small at n=10 with the Q7 default seed).
+- `halving` is more robust on edge cases at the cost of speed.
+
+The widget sits directly below the existing `linear_solver` radio,
+so the form has all per-call algorithm choices grouped together.
+
+### §12.2 Comparison renderers untouched
+
+`render_hni_vs_nni` and `render_eigenvalue_compare` retain the
+`halving=False` default. The variant choice is **not** added to
+the comparison tabs because:
+
+- `render_hni_vs_nni` tells a single HONI vs NNI canonical
+  cross-validation story (Phase 1 §1.1.5 multi-restart sweep used
+  the canonical NNI as the reliable reference). Letting the
+  comparison run against `halving=True` would muddy that story
+  without adding insight that the dedicated NNI tab does not
+  already cover.
+- `render_eigenvalue_compare` aggregates 2–3 parallel runs into a
+  single panel of metrics. Allowing per-run variant selection is
+  possible but would expand the per-run config from three knobs
+  to four; the comparison's purpose (tolerance sweeps, solver
+  comparison) does not benefit from variant mixing.
+
+A grep verifies the two comparison `nni(...)` call sites do not
+pass `halving=`, and therefore use `nni()`'s default
+`halving=False`.
+
+### §12.3 Fallback chain preserved
+
+Sub-step 2.2's recursive fallback inside `nni()` still triggers
+when the user selects `canonical` and the case hits the residual
+upper-bound assertion. The Sub-step 2.6 `_capture_algorithm_warnings`
+context manager wraps the new `halving=halving_flag` call exactly
+as before, and `_render_warnings` (with dedup) shows the chain in
+the result panel.
+
+A spot-check on Q7_small (n=10, m=3, seed=42) with the new
+explicit `halving=False`:
+
+```
+lambda_U: 10.756224, nit: 199
+Warnings captured: 1 (deduped from many)
+  RuntimeWarning: NNI canonical (halving=False) hit residual
+  upper-bound violation at outer iter 199...
+```
+
+Same behaviour as before §12 — the canonical-selected run still
+falls back to `halving=True`, converges to the canonical-baseline
+λ, and surfaces the chain warning to the UI.
+
+### §12.4 Verification
+
+- 7 parity tests all pass (the algorithm change set is empty —
+  this is a pure UI addition that flips an already-supported
+  kwarg).
+- `algorithms.py` syntax + import check pass.
+- Q7_small fallback test: canonical-selected run still reaches
+  halving via fallback, λ = 10.756224 matches the explicit
+  `halving=True` baseline from Phase 1 §1.3 D3.
