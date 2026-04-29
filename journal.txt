@@ -249,3 +249,61 @@ Day 12 entry options (user to decide):
   Phase 2 Tier 3 deferred candidate
 - Different direction: paper writing, NLS/NCP extension, productize,
   research notes LaTeX/PDF, etc.
+
+
+Day 13 (2026-05-01): NNI alignment audit + paper Example 1 reproduction.
+2 commits.
+------------------------------------------------------------------------
+
+Phase A — NNI alignment audit (commit 4380f47):
+7-point audit of toolbox NNI vs Liu/Guo/Lin (Numer. Math. 2017) Algorithm 1
++ §7 numerical experiments specification. Initial draft incorrectly treated
+Eq. 37 as the implementation acceptance criterion. After clarification
+(Eq. 37 is the stronger inequality used in Lemma 6 / Lemma 8 for theoretical
+convergence proofs; numerical algorithm uses h_k(theta) > 0 element-wise,
+which is mathematically equivalent to toolbox's monotone-lambda guard),
+revised audit shows:
+- 0 algorithm deviations
+- 3 default-config deviations (tol, initial_vector, maxit — all kwargs)
+- 4 aligned points
+
+Phase B unblocked. Toolbox NNI faithfully implements paper Algorithm 1 in
+both canonical (halving=False) and NNI-hav (halving=True) modes.
+
+Doc: docs/papers/liu2017_alignment_audit.md (5 sections, 106 lines).
+
+Phase B B1 — Example 1 reproduction (commit 5637771):
+Wind power Markov chain example. Paper formula 'A_{ijk} = mu_1*Q[i,j] +
+mu_2*Q[i,k] + mu_3*Q_i' is ambiguous (3 indices but tensor order = 4,
+'Q_i' notation unclear).
+
+Disambiguation via 6-candidate brute-force sweep with NNI 5-iter convergence
+as oracle (paper Figure 1):
+- m=3 candidates: ruled out by paper text 'order 4'
+- m=4 stationary (l-dummy): 5 iter, lambda=15.7719, but rank-deficient in l
+  axis (not a transition probability tensor)
+- m=4 third_follower: 5 iter, lambda=15.9115, Raftery 1985 MTD standard form
+
+third_follower selected. The third Q channel depends on the missing 4th
+index l: A_{i,j,k,l} = mu_1*Q[i,j] + mu_2*Q[i,k] + mu_3*Q[i,l]. This matches
+Raftery (J.R.S.S. 1985) ref [20] cited in paper §7 Example 1.
+
+Reproduction confirmed:
+- nit = 5 (paper Figure 1: NNI converges in 5 iterations)
+- lambda_U = 15.911456053987
+- final residual = 2.233e-16 (machine epsilon)
+
+New files:
+- python/streamlit_app/problems/tensor_eigenvalue/paper_examples.py
+  (builder with full disambiguation docstring)
+- python/test_paper_example1.py (reproduction test)
+
+7 parity tests all pass. Algorithm code unchanged.
+
+Day 14 plan: continue Phase B with Examples 2-5
+- B2: Signless Laplacian (m=3,4,5, n=20,50,100, 9 cases) — paper Table 1
+- B3: Halving demo (4th-order, n=20, A=100D+C) — paper Figure 2
+- B4: Weakly irreducible non-weakly-primitive tensor — paper Figure 3
+- B5: Z-tensor smallest eigenpair — paper Table 2
+
+Memory state: 12 fragility memories.
