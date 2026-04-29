@@ -307,3 +307,66 @@ Day 14 plan: continue Phase B with Examples 2-5
 - B5: Z-tensor smallest eigenpair — paper Table 2
 
 Memory state: 12 fragility memories.
+
+
+Day 14 (2026-05-02): Phase B B2 + B3 partial. 4 commits.
+--------------------------------------------------------
+
+Phase B B2 — Example 2 reproduction (commit 8fa06b7):
+Signless Laplacian of m-uniform hypergraph, 9 cases (m in {3,4,5},
+n in {20,50,100}). Required deeper engagement with paper:
+
+User confer (paper first author) revealed paper §7 Example 2 uses
+consec_diff stopping (|lambda_k - lambda_{k-1}|/|lambda_k| <= tol),
+not the bracket criterion stated in §7 introductory text. Per-case tol
+inferred from per-iter trajectory dump:
+- 6 cases at tol=1e-13
+- 2 cases at tol=1e-14 (large-n consec_diff would stop one iter early)
+- 1 case (4, 100) at tol=2e-16 (noise-floor non-monotone trajectory,
+  no single tol can match paper's nit=13 exactly)
+
+ALLOWED_NIT_DIFF=1 accommodates MATLAB R2013a vs Python scipy LU pivot
+differences. 8/9 strict + 1/9 within +/-1.
+
+Implementation: nni() gains stopping_criterion kwarg ('bracket' default,
+'consec_diff' for paper Example 2). Default branch bit-identical to
+all earlier behaviour.
+
+Phase A audit doc updated with §6 documenting stopping criterion
+clarification.
+
+Phase B B3 — Example 3 partial (commit 093b5e7):
+4th-order, 20-dim, A = 100*D + C (diagonal amplification 100x).
+Canonical NNI (theta=1) reproduces paper §7 Ex 3 'no more than 20 iter'
+target: nit=18. Halving NNI fails: nit=199 (maxit cap), bracket stuck
+at 9.13e-11.
+
+User uploaded paper MATLAB source (NNI.m + NNI_hav.m) which revealed
+deeper algorithm misalignment than Phase A audit captured:
+- m=3 step_length uses closed-form theta formula, not iterative halving
+- m>=4 NNI_hav uses Eq. 37 acceptance with Eta=10, not toolbox's
+  monotone-lambda guard
+- NNI_hav has outer abort mechanism for non-monotone lambda; toolbox lacks
+- Paper §7 text Eta values (1 for m=3, 0 for m>=4) do not match MATLAB
+  code values (0.1 for m=3, 10 for m>=4)
+
+Three-way misalignment: paper text != MATLAB code != toolbox port.
+Phase A audit was correct given toolbox-vs-paper-text comparison (which
+was its scope), but is incomplete for actual paper-reproduction work.
+
+Day 15 plan: strategic decision — re-align toolbox to MATLAB code
+(major refactor), keep toolbox as-is and document as conceptual port
+of paper text (current state), or pause Phase B and rebuild from
+MATLAB code (largest scope). main_6D.m and main_ex5.m do not appear
+to be paper Example reproductions — Day 15 should also identify which
+.m files generated paper Tables/Figures.
+
+Memory state: 12 fragility memories.
+
+Day 15 entry options:
+- Re-align toolbox to MATLAB step_length / NNI_hav (3-5 day rewrite)
+- Document misalignment, accept partial Phase B (Examples 1-2 PASS,
+  Example 3 partial), proceed B4-B5 with same caveat
+- Pause Phase B, deep-port from MATLAB code (1 week+)
+- Different direction (paper writing on the misalignment finding itself,
+  NLS/NCP, etc.)
