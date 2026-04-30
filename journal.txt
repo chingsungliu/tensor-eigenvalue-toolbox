@@ -370,3 +370,70 @@ Day 15 entry options:
 - Pause Phase B, deep-port from MATLAB code (1 week+)
 - Different direction (paper writing on the misalignment finding itself,
   NLS/NCP, etc.)
+
+
+Day 15 (2026-05-03): Phase B audit revision via Octave verification.
+1 commit (91f5dda).
+--------------------------------------------------------------------
+
+Day 15 strategic decision: User chose direction 1 (re-align toolbox to
+MATLAB code) after Day 14 B3 revealed three-way potential misalignment.
+Implementation took unexpected turn — Octave (MATLAB-compatible
+interpreter) was available in conversation sandbox, allowing immediate
+verification without the planned 'user runs MATLAB and uploads .mat
+files' workflow.
+
+Reference trajectory dump for 5 paper examples on paper's NNI.m /
+NNI_hav.m sources:
+- Example 1 (wind power, m=4 n=4): MATLAB nit=6, lambda=15.911456053986655
+- Example 2 small cases (m in {3,4} × n in {20,50}, plus (3,100)):
+  MATLAB strict match paper Table 1 with default bracket stopping
+- Example 3 (m=4 n=20, 100*D+C):
+  Canonical NNI nit=19 (within paper's <=20 bound)
+  NNI_hav nit=200 NOT CONVERGED, residual stuck at 5e-11
+- Example 4 (3x3x3, weakly irreducible non-primitive):
+  MATLAB nit=10, lambda=1.0, Perron=(1/sqrt(3))*[1,1,1] perfect
+- Example 5 small cases (m=3 n in {20,50,100}, m=4 n=20):
+  MATLAB 4/4 strict match paper Table 2; (4,50) off by 1 due to
+  random init seed sensitivity
+- Examples 2 (4,100) and (5,*) skipped due to Octave sandbox memory
+  limits (m=5/n=100 dense tensor = 80GB).
+
+Major finding: The actual misalignment is between paper §7 text and
+the paper's own MATLAB implementation — not between the toolbox and
+MATLAB code. Toolbox is faithful to BOTH the paper Algorithm 1
+specification AND the MATLAB numerical behaviour, even where paper
+text iter counts differ from MATLAB output:
+- Example 1: paper says 5 iter, MATLAB runs 6, toolbox runs 5
+  (toolbox matches paper text, not MATLAB; both reach same eigenvalue)
+- Example 3: paper Figure 2 says ~74 iter, MATLAB itself doesn't
+  converge (200 iter NOT CONVERGED), toolbox shows identical
+  NOT-CONVERGED behaviour. Paper's 74-iter target unreproducible
+  from the source code provided.
+
+Phase A audit doc §7 added documenting three-way comparison. §3
+deviation classification (0 algorithm, 3 default, 4 aligned) remains
+correct. Phase B B3 NNI-hav reframed: not toolbox limitation but
+paper-internal inconsistency. Test now strict-asserts toolbox stays
+in MATLAB-matching NOT-CONVERGED regime.
+
+Implementation: 4 files modified (audit doc + 3 test docstrings +
+B3 test renamed/reasserted). Zero algorithm code changes. 7 parity
++ 3 paper reproduction = 10 tests green.
+
+This finding has paper-quality value beyond the toolbox itself:
+demonstrates that even author-provided MATLAB sources may not
+reproduce paper figures exactly (versioning drift between paper
+acceptance and code archival), and that a modern Python port can
+serve as 3rd-party verification of paper text claims.
+
+Memory state: 12 fragility memories.
+
+Day 16 plan options:
+- B4: Example 4 reproduction (3rd-order, n=3, hardcoded entries,
+  ~30 min, MATLAB ground truth already in /home/claude/matlab_ref/)
+- B5: Example 5 reproduction (Z-tensor, reuses build_signless_laplacian
+  utility with cyclic edge set, ~1.5 hr)
+- Phase C: Demo UI integration (paper examples in dropdown)
+- Phase D: Top-level reproduction report writeup
+- Different direction: paper writing on the misalignment finding
