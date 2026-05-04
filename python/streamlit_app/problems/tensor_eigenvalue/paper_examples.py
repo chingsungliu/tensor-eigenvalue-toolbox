@@ -165,3 +165,65 @@ def build_liu2017_example3() -> Tuple[csr_matrix, np.ndarray]:
     AA = build_signless_laplacian(m=4, n=20, diagonal_coeff=100.0)
     x0 = np.ones(20) / np.sqrt(20)
     return AA, x0
+
+
+def build_liu2017_example4(seed: int = 42) -> Tuple[csr_matrix, np.ndarray]:
+    """Liu / Guo / Lin (Numer. Math. 2017) §7 Example 4 — weakly irreducible
+    non-weakly-primitive tensor.
+
+    3rd-order, 3-dim tensor with hardcoded entries (paper [8, Example 3.2]):
+
+        A[1,2,2] = A[2,3,3] = A[3,1,1] = 1   (1-indexed; all other 24 entries 0)
+
+    Paper Figure 3 reports NNI converges while NQZ fails: NQZ on this
+    tensor is a permutation cycle for any positive initial vector other
+    than the Perron vector itself, so it never converges. Paper §7 text
+    states "(37) holds with theta_k=1 for each iteration of NNI and the
+    halving procedure is not used".
+
+    Paper Perron pair: ``λ* = 1``, ``x* = (1/√3)·[1, 1, 1]``.
+
+    Paper §7 says "we use a random positive vector to be the initial
+    vector". For reproducible reference comparison this builder accepts
+    a ``seed`` argument; default ``42`` matches the Day 15 Octave
+    verification (MATLAB nit=10, λ=1.0, Perron exact). Python
+    ``np.random.default_rng`` produces a different sequence than MATLAB
+    ``rand()``, so bit-identical reproduction of MATLAB iter count is
+    not feasible — but the example converges from any positive initial
+    vector to the same Perron pair, so the test asserts on
+    ``(λ, Perron vector)`` rather than exact iter count.
+
+    The mode-1 unfolding uses ``order='F'`` to match the toolbox-wide
+    column-major convention (see ``build_signless_laplacian`` docstring
+    and ``ten2mat`` Paper derivation). For this specific tensor the
+    nonzeros lie on the ``j_0 = j_1`` diagonal, so C-order and F-order
+    produce numerically identical unfoldings — but the explicit
+    ``order='F'`` keeps the convention defensive against future variants.
+
+    Parameters
+    ----------
+    seed : int, default 42
+        Seed for ``np.random.default_rng`` used to draw the positive
+        initial vector. Default matches Day 15 Octave reference.
+
+    Returns
+    -------
+    AA : scipy.sparse.csr_matrix, shape (3, 9)
+        Mode-1 unfolding of the order-3, dim-3 tensor, column-major.
+    x0 : np.ndarray, shape (3,)
+        Random positive initial vector drawn from
+        ``np.random.default_rng(seed).uniform(0, 1, size=3)``.
+    """
+    n = 3
+
+    A_dense = np.zeros((n, n, n))
+    A_dense[0, 1, 1] = 1.0  # paper A[1,2,2] (1-indexed)
+    A_dense[1, 2, 2] = 1.0  # paper A[2,3,3]
+    A_dense[2, 0, 0] = 1.0  # paper A[3,1,1]
+
+    AA = csr_matrix(A_dense.reshape(n, -1, order="F"))
+
+    rng = np.random.default_rng(seed)
+    x0 = rng.uniform(0.0, 1.0, size=n)
+
+    return AA, x0
