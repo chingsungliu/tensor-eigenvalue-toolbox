@@ -27,6 +27,7 @@ import streamlit as st
 
 from streamlit_app.about import render_about
 from streamlit_app.problems.tensor_eigenvalue.algorithms import (
+    ALGORITHM_GROUP as TENSOR_EIGENVALUE_ALGORITHM_GROUP,
     ALGORITHMS as TENSOR_EIGENVALUE_ALGORITHMS,
 )
 
@@ -92,11 +93,35 @@ def main() -> None:
         algorithm_key: str | None = None
         if algorithms is not None:
             st.markdown("### Step 2 — 演算法")
-            algorithm_key = st.radio(
-                "algorithm",
-                options=list(algorithms.keys()),
-                label_visibility="collapsed",
-            )
+            # Phase E §2.1: surface algorithm grouping (Solvers /
+            # Comparisons / Paper reproduction) via the radio's
+            # `captions=` parameter so first-time visitors see what
+            # each entry is for. Tensor Eigenvalue only — other
+            # problems (when added) can supply their own grouping
+            # via PROBLEM_ALGORITHMS dispatch.
+            if problem == "Tensor Eigenvalue Problem":
+                st.caption(
+                    "📍 **新手建議從 _Paper Examples (Liu 2017)_ 開始** — "
+                    "看 5 個 paper §7 examples 在 toolbox 即時重現。"
+                )
+                option_keys = list(algorithms.keys())
+                captions = [
+                    f"{TENSOR_EIGENVALUE_ALGORITHM_GROUP[k][0]} · "
+                    f"{TENSOR_EIGENVALUE_ALGORITHM_GROUP[k][1]}"
+                    for k in option_keys
+                ]
+                algorithm_key = st.radio(
+                    "algorithm",
+                    options=option_keys,
+                    captions=captions,
+                    label_visibility="collapsed",
+                )
+            else:
+                algorithm_key = st.radio(
+                    "algorithm",
+                    options=list(algorithms.keys()),
+                    label_visibility="collapsed",
+                )
 
         st.divider()
         if st.button(

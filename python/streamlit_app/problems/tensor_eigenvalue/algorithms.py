@@ -1,13 +1,81 @@
 """Layer 3 algorithm renderers for the Tensor Eigenvalue Problem.
 
-Exposes four Streamlit renderers via the ``ALGORITHMS`` dict:
-  - ``Multi``              : multilinear Newton solver (HNI base layer)
-  - ``HONI``               : shift-invert eigenvalue iteration
-  - ``NNI``                : single-layer Newton (user's primary algorithm)
-  - ``HONI vs NNI comparison`` : cross-algorithm side-by-side
+Exposes seven Streamlit renderers via the ``ALGORITHMS`` dict, grouped
+in three categories:
 
-All four default to the Q7-style sparse M-tensor built by
-:func:`streamlit_app.problems.tensor_eigenvalue.defaults.build_q7_tensor`.
+**Solvers (single algorithm)**
+  - ``Multi`` (:func:`render_multi`) — multilinear Newton solver, the
+    inner solver inside HONI; exposed standalone for inspection.
+  - ``HONI`` (:func:`render_honi`) — two-level shift-invert iteration
+    for the largest H-eigenvalue.
+  - ``NNI`` (:func:`render_nni`) — single-layer Newton iteration, the
+    user's primary algorithm; ``halving`` toggle exposes NNI-hav.
+
+**Comparisons (multi-run side-by-side)**
+  - ``HONI vs NNI comparison`` (:func:`render_hni_vs_nni`) — fixed two-
+    algorithm cross-validation tile (`|Δλ|` to machine precision).
+  - ``Eigenvalue solver comparison (HONI / NNI, multi-run)``
+    (:func:`render_eigenvalue_compare`) — 2- or 3-run lab; each run's
+    algorithm / tol / solver independently configurable.
+  - ``Multilinear solver comparison (Multi, multi-run)``
+    (:func:`render_multilinear_compare`) — 2- or 3-run Multi tol sweep.
+
+**Paper reproduction (Phase B / C)**
+  - ``Paper Examples (Liu 2017)`` (:func:`render_paper_examples`) —
+    five Liu / Guo / Lin (Numer. Math. 2017) §7 examples on demand,
+    with paper-vs-toolbox comparison. Phase B reproduced all five
+    (Day 13–16); Phase C wired the dropdown (Day 17).
+
+Renderer pattern
+----------------
+The first six renderers (Solvers + Comparisons) share an identical
+template — a contributor adding an 8th solver / comparison should
+follow it for visual consistency:
+
+1. ``st.header`` with the function signature, ``st.caption`` block(s)
+   describing what the algorithm does + any known fragility.
+2. Two-column layout::
+
+      col_in, col_out = st.columns([1, 2])
+
+   ``col_in`` carries inputs; ``col_out`` carries results. The
+   shared-config ``render_*_compare`` variants use a vertical layout
+   with explicit ``st.subheader`` sections instead.
+3. ``_render_data_source_block(renderer_key)`` for the Q7-default /
+   Upload radio. The helper handles the file-uploader + parse error
+   surface; callers receive ``(is_upload, upload_data)``.
+4. ``with st.form("{name}_form"):`` for parameter inputs (``m`` / ``n``
+   / ``tol`` / ``maxit`` / solver radios), ending in
+   ``st.form_submit_button(..., type="primary")``. Forms prevent
+   per-widget reruns.
+5. On submit: build inputs (Q7 default or upload), wrap the algorithm
+   call in ``with _capture_algorithm_warnings() as caught:``, persist
+   to ``st.session_state["{name}_result"]``. Always wrap in
+   ``try / except Exception as e:`` and stash the error message.
+6. Output side: ``_render_warnings(result.get("warnings"))``, then
+   metrics (``st.columns`` + ``st.metric``), trajectory plots
+   (``_plot_log_history``), eigenvector display
+   (``_plot_bar_vector``), and ``st.caption("**讀圖要點**：…")``
+   blocks for any non-obvious axis or scale.
+7. ``with st.expander("📄 對應的 MATLAB 原始碼"):`` at the bottom,
+   showing the corresponding MATLAB source via
+   ``read_snippet(name)``.
+
+The seventh renderer, ``render_paper_examples`` (Phase C, Day 17),
+intentionally deviates from this template: its config is fixed by
+the paper (no user-tunable algorithm knobs), so it uses a simpler
+top-level dropdown + flat layout + no form / no session_state.
+The deviation is a paper-showcase design choice — see Phase E audit
+§1.1 for the discussion.
+
+Defaults
+--------
+All renderers using the Q7 path default to the synthetic M-tensor
+built by :func:`streamlit_app.problems.tensor_eigenvalue.defaults.build_q7_tensor`
+(diagonal ``U[1, 11]`` + sparse perturbation, ``rng_seed=42``,
+positive ``x0``). The data-source block surfaces an in-UI explanation
+of what Q7 is; see ``_render_data_source_block`` for the expander
+content.
 """
 from __future__ import annotations
 
@@ -208,6 +276,37 @@ def _render_data_source_block(renderer_key: str):
     )
     is_upload = source.startswith("Upload")
     if not is_upload:
+        # Phase E §2.2: in-UI explanation of what Q7 is, so a first-time
+        # visitor running with the default knows what tensor was solved.
+        # Collapsed by default — does not disrupt existing layout.
+        with st.expander(
+            "ℹ️ About the default Q7 tensor", expanded=False
+        ):
+            st.markdown(
+                "**Q7** is the synthetic positive M-tensor used as the "
+                "shared default across the Multi / HONI / NNI parity tests "
+                "(`test_multi_parity.py`, `test_honi_parity.py`, "
+                "`test_nni_parity.py`). It is **not** from the Liu 2017 "
+                "paper — for paper-§7 reproductions see the *Paper "
+                "Examples (Liu 2017)* tab.\n\n"
+                "Construction (`defaults.build_q7_tensor`):\n"
+                "- Diagonal `d ~ U[1, 11]`, lifted to a tensor diagonal "
+                "via `sp_tendiag(d, m)`.\n"
+                "- Off-diagonal sparse perturbation: density `0.02`, "
+                "magnitude `0.01·U[0, 1]`.\n"
+                "- Initial vector `x₀ = |rand(n)| + 0.1` (strictly positive).\n"
+                "- Fixed `rng_seed=42` so successive runs are reproducible.\n\n"
+                "**Why this default**: Q7 lives in the regime where the "
+                "Rayleigh-quotient noise floor "
+                "`ε · n^(m-1) / min_i(x_i)^(m-1)` becomes visible (small "
+                "`min_i(x_i)`), so the demo exercises the same fragility "
+                "the parity tests document. See "
+                "`docs/papers/rayleigh_quotient_noise_floor_en.md` for the "
+                "full discussion.\n\n"
+                "**To use a different tensor**: switch to *Upload* above "
+                "(`.mat` or `.npz`, reserved keys `AA` / `A_tensor` / `x0`), "
+                "or pick a paper-§7 example from the *Paper Examples* tab."
+            )
         return False, None
 
     uploaded = st.file_uploader(
@@ -1731,4 +1830,39 @@ ALGORITHMS = {
     "Eigenvalue solver comparison (HONI / NNI, multi-run)": render_eigenvalue_compare,
     "Multilinear solver comparison (Multi, multi-run)": render_multilinear_compare,
     "Paper Examples (Liu 2017)": render_paper_examples,
+}
+
+# Sidebar grouping (Phase E §2.1) — maps algorithm key → (group label,
+# one-line role caption). Consumed by demo_v0.py to surface which
+# entries are solvers / comparisons / paper reproduction. Algorithm
+# keys themselves are not changed (other code may reference them).
+ALGORITHM_GROUP = {
+    "Multi": (
+        "Solvers",
+        "Multilinear Newton (HNI inner solver)",
+    ),
+    "HONI": (
+        "Solvers",
+        "Two-level shift-invert eigenvalue iteration",
+    ),
+    "NNI": (
+        "Solvers",
+        "Single-layer Newton-Noda Iteration (primary algorithm)",
+    ),
+    "HONI vs NNI comparison": (
+        "Comparisons",
+        "Fixed two-algorithm cross-validation",
+    ),
+    "Eigenvalue solver comparison (HONI / NNI, multi-run)": (
+        "Comparisons",
+        "2-3 configurable runs side-by-side",
+    ),
+    "Multilinear solver comparison (Multi, multi-run)": (
+        "Comparisons",
+        "2-3 Multi runs (tol sweep)",
+    ),
+    "Paper Examples (Liu 2017)": (
+        "Paper reproduction",
+        "Liu 2017 §7 Examples 1-5 (start here for new visitors)",
+    ),
 }
