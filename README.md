@@ -1,199 +1,256 @@
-# my-toolbox
+# tensor-eigenvalue-toolbox
 
-**Live demo**：<https://csliu-toolbox.streamlit.app>
+Python port of MATLAB tensor-eigenvalue research code, with a live
+Streamlit demo that reproduces the five numerical examples from
+**Liu, Guo, Lin** _Newton-Noda iteration for finding the Perron pair
+of a weakly irreducible nonnegative tensor_, **Numer. Math. 137(1),
+63–90 (2017)** — DOI [10.1007/s00211-017-0869-7](https://doi.org/10.1007/s00211-017-0869-7).
 
-## Scope
-
-This toolbox targets tensor eigenvalue problems (third-order tensors
-and higher, m ≥ 3) following the Newton-Noda Iteration framework
-introduced in Liu, Guo, and Lin (Numer. Math. 2017) and the
-Higher-Order Newton Iteration in Liu (J. Sci. Comput. 2022).
-
-For m = 2 (matrix eigenvalue) problems, please use
-`scipy.sparse.linalg.eigs` or `numpy.linalg.eig` — those are
-industrial-grade implementations with better convergence guarantees
-on the matrix case. For m = 1 (linear scaling), no eigenvalue problem
-exists. The `nni` / `honi` / `multi` entry points raise `ValueError`
-when called with `m < 3` and the demo's `m` selector is bounded
-`[3, 5]`.
-
-## 這是什麼
-
-這個 repo 是一個**練習用 sandbox**，目的是建立「把 MATLAB 演算法 port 成 Python 並驗證數值一致性」的標準工作流程。目前還不是正式的演算法庫，裡面只有一個示範用的 `gaussian_blur` 實作、一套對帳機制，以及一份把踩過的坑寫下來的文件。
-
-流程穩固之後，再用來 port 真正的研究演算法。
+**Live demo**: <https://csliu-toolbox.streamlit.app>
 
 ---
 
-## 目錄結構
+## Quick start
 
-```
-my-toolbox/
-├── README.md                        你在看的這份
-├── .gitignore
-├── matlab_exercise/
-│   ├── gaussian_blur.m              示範演算法，用 base MATLAB 寫
-│   ├── generate_reference.m         固定種子、跑演算法、存 reference.mat
-│   └── reference.mat                （git 不追蹤）MATLAB 輸出，對帳基準
-└── python/
-    ├── .venv/                       （git 不追蹤）numpy + scipy
-    ├── gaussian_blur.py             Python port
-    ├── test_gaussian_blur.py        單元測試（不依賴 MATLAB）
-    └── test_parity.py               與 MATLAB 逐位元對帳
-```
+### 1 · Just try the demo (no install)
 
----
+Open <https://csliu-toolbox.streamlit.app> → sidebar **Step 2 演算法**
+→ pick **Paper Examples (Liu 2017)** → dropdown one of the five
+§7 examples → **Run NNI**. Each example shows the toolbox result
+side-by-side with the paper-§7 expected iter / λ.
 
-## 環境設定
-
-Python 端用一個**本地 venv**，不污染系統 Python。第一次用：
+### 2 · Run locally
 
 ```bash
-cd ~/Projects/my-toolbox/python
+git clone https://github.com/chingsungliu/tensor-eigenvalue-toolbox
+cd tensor-eigenvalue-toolbox/python
 python3 -m venv .venv
-.venv/bin/pip install numpy scipy
+.venv/bin/pip install -r ../requirements.txt -r ../requirements_ui.txt
+.venv/bin/streamlit run streamlit_app/demo_v0.py
 ```
 
-之後執行：
+The demo opens at `http://localhost:8501`. Tested with Python 3.9,
+numpy 2.0.2, scipy 1.13.1, streamlit 1.50.
+
+### 3 · Reproduce paper §7 examples from the command line
 
 ```bash
-# 單元測試（不需要 MATLAB）
-.venv/bin/python test_gaussian_blur.py
-
-# 數值對帳（需要先產生 reference.mat）
-.venv/bin/python test_parity.py
+cd python
+.venv/bin/python test_paper_example1.py   # wind-power MTD (m=4, n=4)
+.venv/bin/python test_paper_example2.py   # signless Laplacian, paper Table 1 (9 cases)
+.venv/bin/python test_paper_example3.py   # halving demo, m=4, n=20
+.venv/bin/python test_paper_example4.py   # weakly irreducible non-primitive (m=3, n=3)
+.venv/bin/python test_paper_example5.py   # Z-tensor smallest eigenpair, paper Table 2 (9 cases)
 ```
 
-在 MATLAB 裡產生 `reference.mat`（每次改動 `gaussian_blur.m` 時重跑）：
+Each test asserts iter / λ within paper Table tolerances and prints
+PASS on success.
 
-```matlab
-cd ~/Projects/my-toolbox/matlab_exercise
-generate_reference
+---
+
+## What's implemented
+
+### Algorithms
+
+Three core algorithms, fully ported from the MATLAB sources in
+`source_code/Tensor Eigenvalue Problem/2020_HNI_*` and parity-tested
+to machine precision (see `python/test_*_parity.py`):
+
+- **NNI** — Newton-Noda Iteration (single-layer Newton + Rayleigh-quotient
+  bracket `λ_L ≤ λ_★ ≤ λ_U`). Computes the largest H-eigenvalue and the
+  corresponding nonnegative eigenvector of a positive M-tensor. Two
+  variants: canonical `θ = 1` and `halving` line search. Day 10/11
+  perf work: **2.6–3.2× speedup** vs the initial Day 9 port (Q7 baseline
+  39 ms → 12 ms).
+- **HONI** — Higher-Order Newton Iteration (two-level shift-invert).
+  Outer Newton on `λ_U`, inner multilinear solve via Multi. Day 10/11
+  perf: **2.0× / 2.6× speedup** for `exact` / `inexact` branches.
+- **Multi** — Multilinear Newton solver for `A · u^(m-1) = b`. Used as
+  HONI's inner solver; exposed standalone in the demo. Day 10/11 perf:
+  **3.8× speedup**.
+
+All three accept a sparse mode-1 unfolding `(n, n^(m-1))` or a dense
+m-D tensor; the polymorphic dispatch handles both. `linear_solver`
+options: `spsolve` (MATLAB-parity, direct LU) and `gmres` (Python
+fallback for large sparse cases where LU runs out of memory).
+
+### Paper §7 reproduction (Phase B / C, Day 13–17)
+
+| Example | Paper / topic | Toolbox iter | Paper iter | Status |
+|---|---|---:|---:|---|
+| §7 Ex 1 | Wind-power MTD (m=4, n=4) | 5 | 5 | ✅ matches paper, λ = 15.911456053987 |
+| §7 Ex 2 | Signless Laplacian Table 1 (9 cases) | 8–13 | 8–13 | ✅ 9/9 within ±1 iter |
+| §7 Ex 3 | Halving demo, m=4 n=20 (canonical) | 18 | ≤20 | ✅ within paper bound |
+| §7 Ex 3 halving | NNI-hav variant | 199 NOT-CONVERGED | 74 (paper) / 200 NOT-CONVERGED (paper MATLAB) | ⚠ matches paper MATLAB; 74-iter paper figure unreproducible from source |
+| §7 Ex 4 | Weakly irreducible (m=3, n=3) | 6 (Python RNG) / 10 (MATLAB) | Figure 3 only | ✅ Perron pair λ=1, x=(1/√3)·[1,1,1] exact |
+| §7 Ex 5 | Z-tensor Table 2 (9 cases) | varies, all 9 PASS | 5–7 | ✅ 9/9 within ±2 iter (RNG difference in V trap potential) |
+
+The Ex 3 halving discrepancy is documented in
+`docs/papers/liu2017_alignment_audit.md` §7 — Day 15 verified via
+GNU Octave that the paper's own MATLAB `NNI_hav.m` does not reach
+the 74-iter target either; the toolbox matches MATLAB behaviour.
+
+---
+
+## Repository layout
+
+```
+tensor-eigenvalue-toolbox/
+├── README.md                     ← you are here
+├── PROGRESS.md                   per-session notes (Day 1–7)
+├── journal.txt                   per-session notes (Day 8+)
+├── requirements.txt              numpy, scipy
+├── requirements_ui.txt           streamlit, plotly  (demo extras)
+│
+├── python/                       Python implementation
+│   ├── tensor_utils.py           Layer 1/2/3: 5 tensor utils + multi/honi/nni
+│   ├── streamlit_app/            Demo (`demo_v0.py` + `problems/`)
+│   │   ├── demo_v0.py            Two-level menu (problem → algorithm)
+│   │   └── problems/
+│   │       └── tensor_eigenvalue/
+│   │           ├── algorithms.py        7 renderers + ALGORITHM_GROUP
+│   │           ├── defaults.py          Q7 builder
+│   │           ├── hypergraph_utils.py  Cooper-Dutle + cyclic edge sets
+│   │           ├── paper_examples.py    5 Liu 2017 §7 builders
+│   │           └── uploads.py           .mat / .npz parser
+│   ├── test_paper_example*.py    5 paper §7 reproduction tests
+│   ├── test_*_parity.py          9 parity tests (vs MATLAB references)
+│   ├── test_demo_smoke.py        UI integration smoke (AppTest-based)
+│   └── test_tensor_utils.py      Python-only sanity tests
+│
+├── matlab_ref/                   Canonical MATLAB sources (parity references)
+│   ├── hni/                      HONI / Multi
+│   ├── nni/                      NNI canonical + NNI_ha
+│   └── poc_iteration/            per-iteration parity POC
+│
+├── docs/
+│   ├── algorithms_status.md      1-minute status of the 3 core algorithms
+│   ├── audits/                   Phase E audit doc (this PR's parent)
+│   └── papers/                   Liu 2017 alignment audit + research notes
+│
+├── matlab_exercise/              Day 1 worked example: gaussian_blur port
+│   ├── gaussian_blur.m           Reference MATLAB implementation
+│   └── generate_reference.m      Reference .mat generator
+│
+└── scripts/
+    └── check_deploy.py           Streamlit Cloud deploy verifier
 ```
 
----
-
-## 關鍵設計：`matlab_compat` flag
-
-`python/gaussian_blur.py` 的函數有一個 `matlab_compat=False` 參數。這是個**刻意的設計選擇**：
-
-- **一般使用** (`matlab_compat=False`)：scipy 自然預設（`mode='reflect'`, `truncate=4.0`），是 Python 生態系的慣例，物理上也比較合理。
-- **對帳模式** (`matlab_compat=True`)：切到 MATLAB `conv2(h, h, A, 'same')` 的行為（`mode='constant'`, `truncate=3.0`）。只有 `test_parity.py` 會用這個模式。
-
-這樣 Python 版保留 pythonic 的預設介面、不被 port 需求污染，但仍然能驗證跟 MATLAB reference 逐位元一致（誤差 `~1e-16`）。
-
-這個設計是在第一次做 `gaussian_blur` port 時發現的：不加 flag、兩邊直接各自預設跑，max error 是 `3e-1`（邊界差異主導）；對齊邊界降到 `2e-4`（截斷寬度差異）；同時對齊才到 `1.1e-16`（machine epsilon）。
+The `matlab_exercise/` worked example (gaussian_blur port) is preserved
+for historical reference — it established the parity-test pattern that
+the tensor work later inherited. See the relevant section in
+`PROGRESS.md` Day 1–2.
 
 ---
 
-## 新增一個 port 的標準流程
+## Development log
 
-### Phase 1 — 規劃
-- 確認輸入/輸出的型別、形狀、數值範圍
-- 檢查 MATLAB 版有沒有用到 toolbox（見「環境限制」）
-- 預先考慮「三大陷阱」會不會踩到
+This repo grew from a single-algorithm porting exercise (gaussian_blur,
+Day 1) into a paper-reproduction toolbox over ~17 working sessions:
 
-### Phase 2 — MATLAB 端
-- 寫 `matlab_exercise/<algo>.m`，只用 base MATLAB
-- 寫 `matlab_exercise/generate_<algo>_reference.m`：`rng(42)` 固定輸入、跑演算法、存 `<algo>_reference.mat`
-- 手動在 MATLAB 跑一次，確認產出正常
+- **Day 1–2** — gaussian_blur port, parity-test harness, `matlab_compat`
+  flag pattern.
+- **Day 3–7** — Layer 1/2 tensor utilities (5 functions), Multi /
+  HONI / NNI Layer 3 ports, per-iteration parity framework, Streamlit
+  demo v0.
+- **Day 8–12** — Performance optimization (sp_Jaco_Ax 3.8× speedup
+  cascading to NNI 2.6–3.2×, HONI 2.0–2.6×), m≥3 scope enforcement
+  with friendly errors pointing users to scipy alternatives.
+- **Day 13–16** — Phase A NNI alignment audit + Phase B paper §7
+  reproduction (5 examples), Octave verification of paper-vs-MATLAB
+  discrepancy on Ex 3.
+- **Day 17** — Phase C demo UI integration of paper examples, Phase E
+  audit (24 issues across 5 dimensions, see `docs/audits/`) + Stage 1/2
+  remediation (sidebar grouping, Q7 explainer, README rewrite, UI smoke).
 
-### Phase 3 — Python 端
-- 寫 `python/<algo>.py`，簽章**預設用 pythonic 慣例**
-- 寫 `python/test_<algo>.py` — 不依賴 MATLAB 的單元測試（對稱性、守恆律、已知解）
-- 寫 `python/test_<algo>_parity.py` — 讀 `.mat`、呼叫演算法、比對；門檻 `1e-10`（目標 `~1e-16`）
+Per-session notes:
 
-### Phase 4 — 對帳與修正
-跑 parity。如果失敗，照誤差量級診斷：
+- `PROGRESS.md` — Day 1–7 (initial sessions, often paragraph-style).
+- `journal.txt` — Day 8 onwards (terser, dated entries).
 
-| 誤差量級 | 主要嫌疑 |
-|---|---|
-| `~1e-1` | 邊界處理不一致 |
-| `~1e-4` | 核/濾波器截斷寬度不一致 |
-| 整齊的位移 | 索引起點（1-based vs 0-based） |
-
-修正方式：**不要破壞 Python 預設介面**。加 `matlab_compat` flag，預設走 pythonic、`matlab_compat=True` 才切換到 MATLAB 行為。
-
-### Phase 5 — 記錄
-如果這次 port 遇到**新類型**的差異（不是三大陷阱之一），把它補進這份 README 的清單。
+`docs/algorithms_status.md` is the recommended one-minute overview
+of where the three core algorithms stand.
 
 ---
 
-## 三大 MATLAB→Python 陷阱（每次主動檢查）
+## Citation
 
-1. **邊界處理**
-   - MATLAB `conv2('same')` → 零填充
-   - MATLAB `imgaussfilt`/`imfilter` 預設 → replicate
-   - scipy `gaussian_filter`/`convolve` 預設 → reflect
-   - 三種都不一樣，邊界誤差量級通常 `~1e-1`。
+Please cite both **the paper** that this toolbox reproduces and
+**the toolbox itself** if it shows up in your work.
 
-2. **濾波器/核截斷寬度**
-   - MATLAB `imgaussfilt` 預設 `FilterSize = 2*ceil(2*sigma)+1`
-   - 自訂 `conv2` 腳本常用 `ceil(3*sigma)` 半寬
-   - scipy 預設 `truncate=4.0`
-   - 誤差量級通常 `~1e-4`。
+### The paper
 
-3. **索引起點**
-   - MATLAB 1-based、Python 0-based
-   - 算術計算索引（`A(i+1, j) - A(i, j)` 之類）時最容易忘記調整
+> Liu, C.-S., Guo, C.-H., & Lin, W.-W. (2017). Newton-Noda iteration
+> for finding the Perron pair of a weakly irreducible nonnegative
+> tensor. _Numer. Math._ 137(1), 63–90.
+> doi:[10.1007/s00211-017-0869-7](https://doi.org/10.1007/s00211-017-0869-7)
 
----
+### The toolbox
 
-## 環境限制
+> Liu, C.-S. (2026). _tensor-eigenvalue-toolbox: Python port and
+> Streamlit demo of Liu / Guo / Lin (2017) NNI._
+> commit `<your-commit-sha>`, accessed YYYY-MM-DD.
+> Source: <https://github.com/chingsungliu/tensor-eigenvalue-toolbox>.
 
-本機 MATLAB **沒有 Image Processing Toolbox**。意思是：
+To pin a specific commit when citing:
 
-- `imgaussfilt`, `imfilter`, `fspecial`, `imresize`, `imrotate` 等都不能用
-- reference 實作必須用 **base MATLAB**：`conv2`, `fft2`, `ifft2`, 基本矩陣運算 OK
-- 濾波器核要自己手搓，例如 `h = exp(-x.^2 / (2*sigma^2)); h = h / sum(h);`
+```bash
+git rev-parse --short HEAD     # → 7-char SHA, e.g. "3617b5e"
+```
 
-如果未來裝了新 toolbox，記得回來更新這段。
+A formal `CITATION.cff` and a Zenodo DOI are deferred to v1.0
+(see Phase E audit §3.5 in `docs/audits/`).
 
 ---
 
-## Deployment workflow
+## Known limitations
 
-The Streamlit Cloud demo at <https://csliu-toolbox.streamlit.app> is
-auto-rebuilt by a webhook on `git push origin main`. Day 8 saw two
-cases where the webhook did not fire and the demo kept serving an
-older container, so the workflow below treats every push as
-"verify before assuming live".
+- `m = 1` (scalar) and `m = 2` (matrix) are out of scope by design.
+  Calling `multi / honi / nni` with `m < 3` raises `ValueError` with a
+  pointer to `scipy.sparse.linalg.eigs` / `numpy.linalg.eig` for the
+  matrix case.
+- Paper §7 Example 3's NNI-hav 74-iter figure is unreproducible from
+  the paper's own MATLAB source (not a port bug — see
+  `docs/papers/liu2017_alignment_audit.md` §7).
+- Paper §7 Examples 4 / 5 use random initial vectors / trap potentials;
+  Python `np.random.default_rng` is not bit-compatible with MATLAB
+  `rand()` so iter counts differ by ±1–2 from the paper's
+  printed values.
 
-After pushing to `main`:
+For the full audit of code / UX / docs / test gaps see
+`docs/audits/phase_e_audit_2026-05-05.md`.
 
-1. Wait 2-3 minutes for Streamlit Cloud auto-rebuild.
-2. Run `python scripts/check_deploy.py` to verify push state.
-3. Open the demo URL in a browser and scroll the sidebar to the
-   bottom. Look at the `Build: <sha>` caption.
-   - If the shown SHA matches the "Expected build" printed by the
-     check script, deploy is current.
-   - If the shown SHA differs (older), Cloud has not redeployed.
-     Open <https://share.streamlit.io/>, find the `csliu-toolbox`
-     app, click **Manage app → Reboot**. Wait ~2 minutes, refresh
-     demo, recheck sidebar.
-   - If `Build: unknown` is shown, the Cloud container has no
-     `.git/` directory; see "Fallback B" below.
-4. If reboot does not pick up the latest commit, force a rebuild
-   with a trivial commit:
+---
 
-   ```bash
-   echo "" >> README.md
-   git commit -am "redeploy"
-   git push
-   ```
+## Troubleshooting
 
-### Fallback B — `.git/` not present on Cloud container
+### Demo on Streamlit Cloud shows ImportError after a push
 
-If the demo sidebar shows `Build: unknown` after a successful local
-read, the Cloud container is not preserving `.git/` after build. In
-that case, switch the build-SHA mechanism from file-read to one of:
+Streamlit Cloud's auto-rebuild webhook occasionally serves the previous
+container's source for one of the changed files (cache mismatch).
+Symptoms: ImportError on a symbol that exists in the latest source
+(e.g., `cannot import name 'ALGORITHM_GROUP'`). Fix:
 
-- **Streamlit secrets** — set `BUILD_SHA = "<short-sha>"` in the app's
-  Secrets panel and read via `st.secrets["BUILD_SHA"]`. Manual update
-  per push, so this is a stop-gap only.
-- **GitHub Actions write-and-commit** — a workflow that updates a
-  tracked `python/streamlit_app/_build_info.py` with the head SHA
-  and commits before the deploy webhook fires. Adds CI complexity but
-  removes the manual step.
+1. Open <https://share.streamlit.io/>, find the `csliu-toolbox` app.
+2. Click **Manage app → Reboot**.
+3. Wait ~2 minutes, refresh the demo URL.
 
-Pick the path with the User before implementing.
+If reboot does not pick up the latest commit:
+
+```bash
+git commit --allow-empty -m "redeploy"
+git push origin main
+```
+
+If the demo sidebar shows `Build: unknown` in the build SHA caption,
+the Cloud container is not preserving `.git/`; see
+`docs/audits/phase_e_audit_2026-05-05.md` §5.4 for build-SHA injection
+options (deferred to v1.0).
+
+---
+
+## License
+
+Not yet declared. Pending v1.0 milestone (Phase E audit §3.5).
+For now, cite the paper and link this repo; ask the author before
+redistributing.

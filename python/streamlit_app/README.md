@@ -1,5 +1,19 @@
 # Tensor Utils Demo v0（Streamlit）
 
+> **Status note (Day 17 update)**: This sub-README captured the v0 design
+> as of Day 5 (5 tensor utilities, internal-author-only, no deployment).
+> It is **kept as historical context** for the v0 design contract at the
+> bottom (the "extension contract" still applies to new renderers).
+>
+> For the **current scope** (7 algorithm tabs, paper §7 reproduction,
+> deployed at <https://csliu-toolbox.streamlit.app>), see the top-level
+> [README.md](../../README.md). The "v0 不做" claims below have all been
+> superseded — the demo is now deployed, has automated UI smoke tests
+> (`python/test_demo_smoke.py`), and exposes 7 renderers including the
+> Liu 2017 §7 paper-example showcase.
+
+---
+
 ## 這是什麼
 
 Phase D 中期的 **minimum viable demo** — 給目前已 port 完成的 5 個 tensor 工具
