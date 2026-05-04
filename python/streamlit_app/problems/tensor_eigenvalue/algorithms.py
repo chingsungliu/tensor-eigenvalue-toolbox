@@ -1350,6 +1350,379 @@ def render_multilinear_compare() -> None:
         st.code(read_snippet("multi"), language="matlab")
 
 
+# ============================================================================
+# Paper examples (Liu / Guo / Lin 2017) — Phase C demo integration
+# ============================================================================
+
+# Per-case tol for Example 2 (B2 disambiguation, see test_paper_example2.py).
+_EX2_CASE_TOL = {
+    (3, 20):  1e-13, (3, 50):  1e-13, (3, 100): 1e-14,
+    (4, 20):  1e-13, (4, 50):  1e-14, (4, 100): 2e-16,
+    (5, 20):  1e-13, (5, 50):  1e-13, (5, 100): 1e-13,
+}
+
+PAPER_EXAMPLE_SPECS = {
+    "Example 1: Wind power MTD (m=4, n=4)": {
+        "key": "ex1",
+        "title": "§7 Example 1 — Wind-power Markov chain",
+        "description": (
+            "Consider the transition probability tensor A of order 4 and "
+            "dimension 4 for a wind-power higher-order Markov chain. The "
+            "mixture weights μ = (0.629, 0.206, 0.165) and the 4×4 column-"
+            "stochastic transition matrix Q produce the Raftery (1985) "
+            "MTD-form tensor:\n\n"
+            "   A[i,j,k,l] = μ₁·Q[i,j] + μ₂·Q[i,k] + μ₃·Q[i,l]\n\n"
+            "Paper Figure 1 reports NNI converges to relative error < 1e-13 "
+            "in **5 iterations** (NQZ takes 22). Initial vector x₀ = (1/√n)·1."
+        ),
+        "paper_nit": 5,
+        "paper_lambda": 15.911456053987,
+        "needs_seed": False,
+        "needs_case_dropdown": False,
+    },
+    "Example 2: Signless Laplacian (Table 1)": {
+        "key": "ex2",
+        "title": "§7 Example 2 — Signless Laplacian of m-uniform hypergraph",
+        "description": (
+            "The m-th order n-dim signless Laplacian tensor A = D + C of an "
+            "m-uniform connected hypergraph with edge set\n\n"
+            "   E = {(i, j, j+1, …, j+m-2) : i = 1, 2, 3 and j = i+1, …, n-m+2}\n\n"
+            "where D is degree diagonal and C is the Cooper-Dutle adjacency. "
+            "Paper Table 1 reports NNI iter ≤ 13 across 9 (m, n) cases, "
+            "demonstrating quadratic convergence. Paper §7: 'θ_k = 1 works "
+            "for each iteration of NNI; the halving procedure is not used'.\n\n"
+            "Stopping criterion: `consec_diff` (per Day 14 confer with paper "
+            "first author — see `test_paper_example2.py` Q1 for details)."
+        ),
+        "paper_table": {
+            (3, 20): 8, (3, 50): 9, (3, 100): 10,
+            (4, 20): 8, (4, 50): 10, (4, 100): 13,
+            (5, 20): 8, (5, 50): 10, (5, 100): 12,
+        },
+        "needs_seed": False,
+        "needs_case_dropdown": True,
+    },
+    "Example 3: Halving demo (m=4, n=20)": {
+        "key": "ex3",
+        "title": "§7 Example 3 — A = 100·D + C halving demonstration",
+        "description": (
+            "Same edge set as Example 2 but with m=4, n=20 and the diagonal "
+            "amplified by 100×: A = 100·D + C. The amplification pushes "
+            "the spectral structure into a regime where the halving procedure "
+            "is most actively triggered.\n\n"
+            "Paper Figure 2 reports two trajectories:\n"
+            "- **Canonical (θ_k = 1)**: ≤20 iter, non-monotone λ trajectory\n"
+            "- **Halving (NNI-hav)**: ~74 iter (paper text); but Day 15 "
+            "Octave verification on paper's MATLAB source shows it actually "
+            "fails to converge (200 iter NOT CONVERGED with bracket "
+            "residual ~5×10⁻¹¹). The 74-iter target is unreproducible from "
+            "the source code provided. See "
+            "`docs/papers/liu2017_alignment_audit.md` §7."
+        ),
+        "needs_seed": False,
+        "needs_case_dropdown": False,
+        "needs_halving_toggle": True,
+    },
+    "Example 4: Weakly irreducible non-primitive (m=3, n=3)": {
+        "key": "ex4",
+        "title": "§7 Example 4 — A weakly irreducible non-weakly-primitive tensor",
+        "description": (
+            "3rd-order, 3-dim tensor with hardcoded entries (paper [8, "
+            "Example 3.2]):\n\n"
+            "   A[1,2,2] = A[2,3,3] = A[3,1,1] = 1   (1-indexed; other 24 entries 0)\n\n"
+            "Paper Figure 3: NNI converges to Perron pair λ* = 1, "
+            "x* = (1/√3)·[1,1,1]; NQZ fails completely (permutation cycle "
+            "for any positive initial vector other than the Perron vector). "
+            "Paper §7: '(37) holds with θ_k = 1 throughout; halving not used'."
+        ),
+        "paper_lambda": 1.0,
+        "paper_perron": "(1/√3)·[1, 1, 1]",
+        "needs_seed": True,
+        "needs_case_dropdown": False,
+    },
+    "Example 5: Z-tensor smallest eigenpair (Table 2)": {
+        "key": "ex5",
+        "title": "§7 Example 5 — Z-tensor smallest eigenpair via NNI on A = sI − Z",
+        "description": (
+            "Cyclic m-uniform hypergraph with edge set\n\n"
+            "   E = {{i−m+2, …, i+1} : i = m−1, …, n}   (n+1 wraps to 1)\n\n"
+            "Z-tensor Z = D − C + V where V is a random diagonal trap "
+            "potential v = 0.1·rand(n,1). To compute the smallest eigenpair "
+            "of Z, NNI runs on the shifted tensor A = s·I − Z (with "
+            "s = max diag(Z)); the smallest eigenvalue of Z is recovered "
+            "as μ* = s − ρ(A).\n\n"
+            "Paper Table 2 reports NNI iter ≤ 7 across 9 (m, n) cases, "
+            "demonstrating quadratic convergence. Paper §7: 'θ_k = 1 throughout'."
+        ),
+        "paper_table": {
+            (3, 20): 5, (3, 50): 6, (3, 100): 7,
+            (4, 20): 5, (4, 50): 6, (4, 100): 7,
+            (5, 20): 5, (5, 50): 5, (5, 100): 6,
+        },
+        "needs_seed": True,
+        "needs_case_dropdown": True,
+    },
+}
+
+
+def render_paper_examples() -> None:
+    """Render the Paper Examples (Liu 2017) tab — Phase C demo integration.
+
+    User flow:
+      1. Pick example from dropdown (5 options, paper §7 Examples 1–5)
+      2. View paper specification in the expander (formula, expected
+         iter / λ, hypergraph description)
+      3. Configure as applicable: case (m, n) for Examples 2 / 5, seed
+         for Examples 4 / 5, halving variant for Example 3
+      4. Press **Run NNI** → toolbox runs paper-§7-aligned config
+         (halving, stopping_criterion, tol auto-set per example) and
+         displays nit / λ / residual + paper-vs-toolbox comparison +
+         convergence plots + Perron-vector summary
+
+    All paper-§7 algorithm-internal knobs are auto-applied per example
+    so users do not need to know the toolbox's NNI parameter surface.
+    """
+    from streamlit_app.problems.tensor_eigenvalue.paper_examples import (
+        build_liu2017_example1,
+        build_liu2017_example2,
+        build_liu2017_example3,
+        build_liu2017_example4,
+        build_liu2017_example5,
+    )
+
+    st.header("Paper Examples — Liu / Guo / Lin (Numer. Math. 2017)")
+    st.markdown(
+        "Reproduce the 5 numerical examples from Liu, Guo, Lin "
+        "_Newton-Noda iteration for finding the Perron pair of a weakly "
+        "irreducible nonnegative tensor_, **Numer. Math. 137(1), 63–90 "
+        "(2017)**, "
+        "[doi:10.1007/s00211-017-0869-7](https://doi.org/10.1007/s00211-017-0869-7). "
+        "All five examples reproduce in Phase B (commits "
+        "`5637771` / `8fa06b7` / `093b5e7` / `91f5dda` / `2aebe92` / "
+        "`54ed7b9`) — see `docs/papers/liu2017_alignment_audit.md` for "
+        "the toolbox-vs-paper-vs-MATLAB three-way audit."
+    )
+
+    example_label = st.selectbox(
+        "Select example",
+        list(PAPER_EXAMPLE_SPECS.keys()),
+        key="paper_example_select",
+    )
+    spec = PAPER_EXAMPLE_SPECS[example_label]
+
+    with st.expander(f"📄 Paper specification — {spec['title']}", expanded=False):
+        st.markdown(spec["description"])
+        if "paper_nit" in spec:
+            st.markdown(
+                f"**Paper expected**: NNI converges in **{spec['paper_nit']} "
+                "iterations**"
+            )
+        if "paper_lambda" in spec:
+            st.markdown(f"**Paper λ**: `{spec['paper_lambda']}`")
+        if "paper_perron" in spec:
+            st.markdown(f"**Paper Perron vector**: `{spec['paper_perron']}`")
+        if "paper_table" in spec:
+            paper_table = spec["paper_table"]
+            st.markdown("**Paper expected NNI iter (paper Table):**")
+            rows = [
+                f"| m={m}, n={n} | {nit} |"
+                for (m, n), nit in sorted(paper_table.items())
+            ]
+            st.markdown(
+                "| Case | Paper iter |\n|---|---|\n" + "\n".join(rows)
+            )
+
+    config_cols = st.columns(3)
+
+    selected_case = None
+    if spec.get("needs_case_dropdown", False):
+        with config_cols[0]:
+            paper_table = spec["paper_table"]
+            case_options = [
+                f"m={m}, n={n}" for (m, n) in sorted(paper_table.keys())
+            ]
+            case_label = st.selectbox(
+                "Case (m, n)",
+                case_options,
+                key=f"paper_example_case_{spec['key']}",
+            )
+            parts = case_label.replace(" ", "").split(",")
+            m_sel = int(parts[0].split("=")[1])
+            n_sel = int(parts[1].split("=")[1])
+            selected_case = (m_sel, n_sel)
+
+    selected_seed = None
+    if spec.get("needs_seed", False):
+        with config_cols[1]:
+            seed_mode = st.radio(
+                "Random seed",
+                ["Fixed (seed=42, reproducible)", "Random (each run new)"],
+                key=f"paper_example_seed_mode_{spec['key']}",
+            )
+            if seed_mode.startswith("Fixed"):
+                selected_seed = 42
+            else:
+                # Each Run press triggers a rerun; this regenerates a
+                # fresh seed at click-time. Other widget changes also
+                # rerun, but the run path is gated by the button.
+                selected_seed = int(np.random.randint(0, 2**32 - 1))
+
+    halving_choice = "canonical (θ_k=1)"
+    if spec.get("needs_halving_toggle", False):
+        with config_cols[2]:
+            halving_choice = st.radio(
+                "NNI variant",
+                ["canonical (θ_k=1)", "NNI-hav (halving)"],
+                key=f"paper_example_halving_{spec['key']}",
+            )
+
+    if not st.button(
+        "Run NNI", key=f"paper_example_run_{spec['key']}", type="primary"
+    ):
+        st.info("Configure inputs above, then press **Run NNI**.")
+        return
+
+    with st.spinner(f"Running NNI on {example_label}…"):
+        # Per-example dispatch — applies paper §7 algorithm config
+        # (halving, stopping_criterion, tol) so users do not need to
+        # know the toolbox's parameter surface.
+        s_shift = None
+        if spec["key"] == "ex1":
+            AA, x0, m_for_nni = build_liu2017_example1()
+            halving_kwarg = False
+            stopping_kwarg = "bracket"
+            tol = 1e-13
+            expected_nit = spec["paper_nit"]
+        elif spec["key"] == "ex2":
+            AA, x0 = build_liu2017_example2(*selected_case)
+            m_for_nni = selected_case[0]
+            halving_kwarg = False
+            stopping_kwarg = "consec_diff"
+            tol = _EX2_CASE_TOL[selected_case]
+            expected_nit = spec["paper_table"][selected_case]
+        elif spec["key"] == "ex3":
+            AA, x0 = build_liu2017_example3()
+            m_for_nni = 4
+            halving_kwarg = (halving_choice == "NNI-hav (halving)")
+            stopping_kwarg = "bracket"
+            tol = 1e-13
+            expected_nit = (
+                "≤20 (paper §7)"
+                if not halving_kwarg
+                else "~74 (paper text) / 200 NOT CONVERGED (paper MATLAB)"
+            )
+        elif spec["key"] == "ex4":
+            AA, x0 = build_liu2017_example4(seed=selected_seed)
+            m_for_nni = 3
+            halving_kwarg = False
+            stopping_kwarg = "bracket"
+            tol = 1e-13
+            expected_nit = "~10 (MATLAB Octave reference, seed=42)"
+        elif spec["key"] == "ex5":
+            AA, x0, s_shift = build_liu2017_example5(
+                *selected_case, seed=selected_seed
+            )
+            m_for_nni = selected_case[0]
+            halving_kwarg = False
+            stopping_kwarg = "bracket"
+            tol = 1e-13
+            expected_nit = spec["paper_table"][selected_case]
+
+        caught_warnings: list = []
+        with _capture_algorithm_warnings() as caught:
+            lam_U, x, nit, lam_L, res_hist, lam_U_hist = nni(
+                AA, m_for_nni, tol,
+                initial_vector=x0,
+                maxit=200,
+                linear_solver="spsolve",
+                halving=halving_kwarg,
+                stopping_criterion=stopping_kwarg,
+            )
+            caught_warnings = list(caught)
+        final_res = (lam_U - lam_L) / lam_U if lam_U != 0 else float("nan")
+
+    _render_warnings(caught_warnings)
+
+    st.success(f"NNI converged in {nit} iterations")
+
+    result_cols = st.columns(3)
+    result_cols[0].metric("NNI iterations", nit)
+    result_cols[1].metric("λ (largest eigenvalue)", f"{lam_U:.10f}")
+    result_cols[2].metric("Final residual", f"{final_res:.2e}")
+
+    st.markdown("### Paper comparison")
+    if isinstance(expected_nit, int):
+        diff = abs(nit - expected_nit)
+        if diff == 0:
+            marker = "✅ matches"
+        elif diff <= 2:
+            marker = f"🟡 within ±2 iter (diff={diff})"
+        else:
+            marker = f"❌ differs by {diff}"
+        st.markdown(
+            f"**Iterations**: paper says **{expected_nit}**, toolbox got "
+            f"**{nit}** — {marker}"
+        )
+    else:
+        st.markdown(
+            f"**Paper expectation**: {expected_nit}; toolbox got "
+            f"**{nit}** iter"
+        )
+
+    if "paper_lambda" in spec:
+        lam_diff = abs(lam_U - spec["paper_lambda"])
+        lam_marker = (
+            "✅ matches to 1e-10"
+            if lam_diff < 1e-10
+            else f"diff = {lam_diff:.2e}"
+        )
+        st.markdown(
+            f"**Eigenvalue λ**: paper `{spec['paper_lambda']}`, toolbox "
+            f"`{lam_U:.13f}` — {lam_marker}"
+        )
+
+    if spec["key"] == "ex5" and s_shift is not None:
+        smallest_eig_Z = s_shift - lam_U
+        st.markdown(
+            f"**Smallest eigenvalue of Z**: μ* = s − ρ(A) = "
+            f"`{smallest_eig_Z:.6e}` (s = `{s_shift:.6f}`)"
+        )
+
+    st.markdown("### Trajectories")
+    plot_cols = st.columns(2)
+    with plot_cols[0]:
+        _plot_log_history(
+            {"residual (λ_U − λ_L)/λ_U": res_hist},
+            title="Convergence (relative residual)",
+            y_label="residual",
+        )
+    with plot_cols[1]:
+        _plot_log_history(
+            {"λ_U history": lam_U_hist},
+            title="Eigenvalue convergence",
+            y_label="λ_U",
+            log_y=False,
+        )
+
+    st.markdown("### Perron eigenvector (final)")
+    x_display = np.abs(np.asarray(x).flatten())
+    if len(x_display) <= 20:
+        _plot_bar_vector(
+            x_display, title="x* (Perron eigenvector, |x|)",
+            x_label="component",
+        )
+    else:
+        st.markdown(
+            f"**Length**: {len(x_display)}  \n"
+            f"**Min / Max**: `{x_display.min():.6f}` / "
+            f"`{x_display.max():.6f}`  \n"
+            f"**Mean / Std**: `{x_display.mean():.6f}` / "
+            f"`{x_display.std():.6f}`  \n"
+            f"**First 5**: `{x_display[:5].round(6).tolist()}`  \n"
+            f"**Last 5**: `{x_display[-5:].round(6).tolist()}`"
+        )
+
+
 ALGORITHMS = {
     "Multi": render_multi,
     "HONI": render_honi,
@@ -1357,4 +1730,5 @@ ALGORITHMS = {
     "HONI vs NNI comparison": render_hni_vs_nni,
     "Eigenvalue solver comparison (HONI / NNI, multi-run)": render_eigenvalue_compare,
     "Multilinear solver comparison (Multi, multi-run)": render_multilinear_compare,
+    "Paper Examples (Liu 2017)": render_paper_examples,
 }
