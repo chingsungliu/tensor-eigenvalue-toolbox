@@ -129,3 +129,127 @@ def build_signless_laplacian(
         shape=(n, n ** (m - 1)),
     )
     return AA
+
+
+def build_paper_ex5_edge_set(m: int, n: int) -> List[Tuple[int, ...]]:
+    """Liu 2017 §7 Example 5 cyclic edge set.
+
+    E = {{i - m + 2, i - m + 3, ..., i, i + 1} : i = m - 1, ..., n}
+    where the index ``n + 1`` is identified with ``1`` (cyclic wrap).
+    Yields ``n - m + 2`` edges of size ``m``, each a window of ``m``
+    consecutive vertices on the cycle ``Z / nZ``. Returns 0-indexed
+    tuples ready for tensor construction.
+    """
+    if n < m:
+        raise ValueError(f"n must be >= m for Example 5 cyclic edges (got m={m}, n={n})")
+    edges: List[Tuple[int, ...]] = []
+    for i in range(m - 1, n + 1):
+        edge_paper = list(range(i - m + 2, i + 2))      # 1-indexed window of m
+        edge_paper = [1 if v == n + 1 else v for v in edge_paper]
+        edges.append(tuple(v - 1 for v in edge_paper))   # 0-indexed
+    return edges
+
+
+def build_z_tensor(
+    m: int, n: int, *, seed: int = 42
+) -> Tuple[csr_matrix, float]:
+    """Liu 2017 §7 Example 5 Z-tensor — return mode-1 unfolding of the
+    shifted nonneg tensor ``A = s·I − Z`` plus the shift ``s``.
+
+    Z = D − C + V where:
+
+    - D, C are degree diagonal and Cooper-Dutle adjacency (paper Ex 5
+      definitions, identical to Example 2 modulo the edge set).
+    - C uses the cyclic edge set ``build_paper_ex5_edge_set(m, n)``.
+    - V is a diagonal "trap potential" tensor, ``V[v,v,...,v] = 0.1·u_v``
+      with ``u_v ~ rng.uniform(0, 1)`` (paper §7: ``v = 0.1·rand(n,1)``).
+
+    The returned matrix is ``A = s·I − Z = (s−D−V) + C`` where
+    ``s = max_v Z[v,v,...,v] = max_v (deg(v) + 0.1·u_v)``. ``A`` is
+    nonneg by construction (the diagonal is ``s − Z[v,...,v] ≥ 0``,
+    achieving 0 at the argmax vertex; the off-diagonal contributions
+    come from ``+C`` and are positive). The smallest eigenpair of ``Z``
+    is recovered as ``μ* = s − ρ(A)``, ``x* = x_A``.
+
+    Cyclic edges have ``m`` distinct vertices (no repeats since the
+    window is ``m`` consecutive integers on ``Z/nZ`` with ``n ≥ m``),
+    so ``C`` has no diagonal entries — the only diagonal contributions
+    to ``A`` are from ``s·I − D − V``.
+
+    Note on RNG: ``np.random.default_rng`` is not bit-compatible with
+    MATLAB ``rand()``, so the random ``v`` differs between toolbox and
+    MATLAB. Iter counts may differ by 1 from MATLAB Octave reference;
+    the Phase B B5 test absorbs this with ``ALLOWED_NIT_DIFF = 2``.
+
+    Parameters
+    ----------
+    m, n : int
+        Tensor order and dimension. Paper Table 2 tests
+        ``m ∈ {3, 4, 5}`` × ``n ∈ {20, 50, 100}``.
+    seed : int, default 42
+        Seed for the trap potential ``v`` (matches Day 15 Octave
+        reference, modulo the MATLAB / Python RNG difference noted
+        above).
+
+    Returns
+    -------
+    AA : scipy.sparse.csr_matrix, shape (n, n**(m-1))
+        Mode-1 unfolding of ``A = s·I − Z`` (column-major, consistent
+        with ``build_signless_laplacian``).
+    s : float
+        The shift ``max_v Z[v,...,v]``. Caller computes the smallest
+        eigenvalue of ``Z`` as ``s − ρ(A)``.
+    """
+    if m < 3:
+        raise ValueError(f"m must be >= 3 for Z-tensor builder, got m={m}")
+    if n < m:
+        raise ValueError(
+            f"n must be >= m so the cyclic edge set is non-degenerate "
+            f"(got m={m}, n={n})"
+        )
+
+    edges = build_paper_ex5_edge_set(m, n)
+
+    degrees = np.zeros(n, dtype=np.int64)
+    for edge in edges:
+        for v in edge:
+            degrees[v] += 1
+
+    rng = np.random.default_rng(seed)
+    v_diag = 0.1 * rng.uniform(0.0, 1.0, size=n)
+
+    z_diag = degrees.astype(np.float64) + v_diag
+    s = float(np.max(z_diag))
+
+    rows: List[int] = []
+    cols: List[int] = []
+    vals: List[float] = []
+
+    # Diagonal of A: s − Z[v,...,v]. Column index for (v, v, ..., v):
+    # c = v · (1 + n + n² + ... + n^(m-2)).
+    col_factor = sum(n ** k for k in range(m - 1))
+    for v in range(n):
+        rows.append(v)
+        cols.append(v * col_factor)
+        vals.append(s - z_diag[v])
+
+    # Off-diagonal of A from +C (note sign: A = s·I − D + C − V, so the
+    # adjacency contribution carries a positive sign here, in contrast
+    # to D + C in build_signless_laplacian). Each cyclic edge contributes
+    # ``1/(m-1)!`` to every permutation; m! permutations per edge.
+    inv_fact = 1.0 / factorial(m - 1)
+    for edge in edges:
+        for perm in permutations(edge):
+            i = perm[0]
+            c = 0
+            for k in range(m - 1):
+                c += perm[1 + k] * (n ** k)
+            rows.append(i)
+            cols.append(c)
+            vals.append(inv_fact)
+
+    AA = csr_matrix(
+        (vals, (rows, cols)),
+        shape=(n, n ** (m - 1)),
+    )
+    return AA, s

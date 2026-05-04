@@ -25,6 +25,7 @@ from scipy.sparse import csr_matrix
 
 from streamlit_app.problems.tensor_eigenvalue.hypergraph_utils import (
     build_signless_laplacian,
+    build_z_tensor,
 )
 
 
@@ -227,3 +228,52 @@ def build_liu2017_example4(seed: int = 42) -> Tuple[csr_matrix, np.ndarray]:
     x0 = rng.uniform(0.0, 1.0, size=n)
 
     return AA, x0
+
+
+def build_liu2017_example5(
+    m: int, n: int, *, seed: int = 42
+) -> Tuple[csr_matrix, np.ndarray, float]:
+    """Liu / Guo / Lin (Numer. Math. 2017) §7 Example 5 — Z-tensor smallest
+    eigenpair via NNI on the shift ``A = s·I − Z``.
+
+    Constructs ``Z = D − C + V`` on the cyclic m-uniform hypergraph
+
+        E = {{i − m + 2, …, i + 1} : i = m − 1, …, n}   (n + 1 wraps to 1)
+
+    where ``D``, ``C`` follow Cooper-Dutle conventions (paper §7 Example 2)
+    and ``V`` is a diagonal trap potential ``v = 0.1·rng.uniform(0,1,n)``.
+
+    Returns the mode-1 unfolding of ``A = s·I − Z`` (with
+    ``s = max_v Z[v,…,v]``), suitable for direct NNI invocation. NNI
+    computes the largest eigenpair of the nonneg ``A``; the smallest
+    eigenpair of ``Z`` is recovered as ``μ* = s − ρ(A)``.
+
+    Paper §7 Example 5 statement: "(37) holds with ``θ_k = 1`` for each
+    iteration of NNI and the halving procedure is not used" — i.e.
+    ``halving=False`` and the default bracket stopping. Paper Table 2
+    reports NNI iter ≤ 7 across 9 ``(m, n)`` cases (3, 4, 5 × 20, 50, 100),
+    demonstrating quadratic convergence.
+
+    Parameters
+    ----------
+    m, n : int
+        Tensor order and dimension (paper Table 2 tests
+        ``m ∈ {3, 4, 5}`` × ``n ∈ {20, 50, 100}``).
+    seed : int, default 42
+        Seed for the trap potential ``v``. Default matches Day 15 Octave
+        verification, modulo the MATLAB / Python RNG difference (see
+        ``build_z_tensor`` docstring).
+
+    Returns
+    -------
+    AA : scipy.sparse.csr_matrix, shape (n, n**(m-1))
+        Mode-1 unfolding of ``A = s·I − Z``.
+    x0 : np.ndarray, shape (n,)
+        Paper §7 default initial vector ``(1/√n) · 1``.
+    s : float
+        The shift ``max_v Z[v,…,v]``. Caller computes
+        ``smallest_eig_Z = s − ρ(A)``.
+    """
+    AA, s = build_z_tensor(m, n, seed=seed)
+    x0 = np.ones(n) / np.sqrt(n)
+    return AA, x0, s
