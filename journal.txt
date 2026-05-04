@@ -506,3 +506,119 @@ Day 17 plan options:
 - paper writing: use paper-vs-MATLAB finding as motivating example
   for a toolbox-as-3rd-party-verification paper section
 - Different direction entirely
+
+
+Day 17 (2026-05-05): Phase C + Phase E completion. 4 commits in single day.
+
+Phase C — Paper Examples demo tab (commit 89e09a3, +374 lines):
+Added render_paper_examples() as 7th algorithm tab. Reproduces all 5
+paper §7 examples on demand with paper-vs-toolbox comparison. UI
+features: example dropdown, paper specification expander per example,
+case (m,n) selector for Examples 2 and 5, seed (Fixed=42 vs Random)
+for Examples 4 and 5, halving toggle for Example 3. Auto-applies paper
+§7 algorithm config (halving, stopping_criterion, tol) per example.
+Verified via Streamlit AppTest headless: 5/5 examples nit matched
+standalone tests strict.
+
+Phase E audit (commit 3617b5e Stage 1 includes audit doc):
+docs/audits/phase_e_audit_2026-05-05.md (640 lines, 5 dimensions,
+24 issues, 6 HIGH severity). Stage 1 + Stage 2 covered all 6 HIGH
+severity issues.
+
+Phase E Stage 1 (commit 3617b5e, +938 lines):
+- §1.1 algorithms.py module docstring rewrite 4-renderer to 7-renderer
+  + 7-step renderer pattern + Paper Examples deviation note
+- §2.1 sidebar grouping: ALGORITHM_GROUP dict + demo_v0.py uses
+  st.radio(captions=...) + caption '新手建議從 Paper Examples 開始'
+- §2.2 Q7 default tensor expander injected into _render_data_source_block,
+  collapsed by default, present on 6 Q7-using renderers, correctly
+  absent on Paper Examples tab.
+- Throwaway _phase_e_smoke.py via AppTest verified all changes, then
+  deleted.
+
+Phase E Stage 1 deploy mishap:
+After 3617b5e push, Streamlit Cloud showed ImportError on
+'cannot import name ALGORITHM_GROUP from algorithms' — turned out to
+be Cloud build cache mismatch (demo_v0.py picked up new version,
+algorithms.py picked up old). User Reboot via Manage app fixed it
+in ~2 min, demo back to normal. Source code had no bug. Phase E
+Stage 2 README later added a Troubleshooting section documenting
+this failure mode.
+
+Phase E Stage 2 (commit dcdf196, +458 / -148 lines):
+- §3.1 + §5.1 README rewrite: live demo URL, paper reference,
+  Quick Start (3 paths: try demo / local install / paper reproduction
+  tests), what's implemented (3 algorithms with Day 10/11 speedup
+  numbers + 6-row paper §7 status table), repo layout, citation
+  guidance (paper + toolbox + git SHA howto), known limitations,
+  troubleshooting (cache mismatch reboot procedure), license stub.
+- §4.1 UI smoke test: new python/test_demo_smoke.py via
+  streamlit.testing.v1.AppTest. 5 test functions / 14 asserts:
+  initial_render, sidebar_grouping (caption + 7 captions),
+  seven_tabs_navigate, q7_expander_visibility (6 present + 1 absent
+  on Paper Examples), paper_examples_dispatch (5 examples nit assert).
+- python/streamlit_app/README.md: minimum-touch +14 lines status
+  note pointing to top README.
+
+Day 17 cumulative state:
+- 4 commits in single day (89e09a3 + 3617b5e + dcdf196 + 1 reboot)
+- 15 tests green: 9 parity + 5 paper reproduction + 1 demo smoke
+- Algorithm code unchanged from Day 12 (Phase E was UX/docs only)
+- Demo: csliu-toolbox.streamlit.app live with 7 tabs + sidebar
+  grouping + Q7 expander + Troubleshooting documented
+- README from 'Day 1-7 sandbox + gaussian_blur' → 'paper reproduction
+  toolbox + 5 examples + Quick Start + citation'
+- Sharable quality (Claude Code subjective): pre-Phase-E 3/10 →
+  Stage 1 6/10 → Stage 2 8/10
+
+Day 8-17 cumulative:
+- 21 commits across 10 working days
+- Phase A audit, Phase B reproduction (5/5 examples), Phase C demo
+  integration, Phase E audit + remediation (UX + README + smoke test)
+- Algorithm: NNI 3x speedup, m>=3 scope enforcement,
+  stopping_criterion kwarg
+- Tests: 9 parity + 5 paper + 1 demo smoke = 15 green
+- Documentation: README rewrite, audit docs (Phase A + Phase E)
+
+Memory state: 12 fragility memories.
+
+Day 18+ deferred work:
+
+PHASE F — Schrödinger / BEC port (BEC source uploaded Day 17):
+  254 .m files in BEC.zip (10+ years accumulation 2021-2025).
+  Algorithms: Newton-Noda iteration on PDE eigenvalue problems
+  (GPE / NLSE / focusing SE / log SE / quasilinear BEC). Three scope
+  levels offered to user, user direction 'I'll think about it':
+  - Level 1 (~1 week): Port 1D NLSE only as 2nd problem area
+  - Level 2 (~2-3 weeks): 1D BEC family (NLSE + Focusing SE + Log SE)
+  - Level 3 (~1-2 months): 2D BEC + research code, full reproduction
+  Current entry: 1D NLSE_1D.m + myfun_Noda_1D.m (60 lines, paper-aligned).
+  Current 2D solver: ModifiedBEC2_Optimized.m (matrix-free PCG, 2025).
+  User decision pending on (Level, paper alignment target).
+
+PHASE D — Top-level reproduction report (~half day):
+  docs/papers/reproduction_report.md as user-facing reproduction
+  documentation. Sections: overview, methodology (paper text vs
+  MATLAB Octave), results table (5 examples three-way), key finding
+  (paper-vs-MATLAB §7), reproduction guide, conclusion. README.md
+  link, demo screenshots.
+
+PAPER WRITING — Misalignment finding methodology paper:
+  Use Day 14-15 paper-vs-MATLAB-vs-toolbox three-way audit as
+  motivating example. No fixed scope.
+
+OTHER (low priority, Phase E deferred):
+  - §2.6 mixed Chinese/English (by design, do not change)
+  - §3.5 LICENSE / CITATION.cff (defer to v1.0)
+  - §4.4 GMRES sanity test (low value, manual verified)
+  - §5.4 build SHA tooltip + injection options (low impact)
+  - Phase E Stage 2 disclaimer: Troubleshooting references audit
+    §5.4 'build-SHA injection options' but audit §5.4 only covers
+    visitor-facing tooltip; old README Fallback B content not
+    migrated. Follow-up commit can paste Fallback B into audit §5.4
+    or add new §5.6 if needed.
+
+Day 18 to begin with: read this journal entry, decide (Phase F level +
+paper target, or Phase D, or paper writing, or other direction).
+User direction Day 17 evening: 'I'll think about Phase F first, do
+Phase E first; UI looks OK so close Phase E.'
