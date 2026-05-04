@@ -437,3 +437,72 @@ Day 16 plan options:
 - Phase C: Demo UI integration (paper examples in dropdown)
 - Phase D: Top-level reproduction report writeup
 - Different direction: paper writing on the misalignment finding
+
+
+Day 16 (2026-05-04): Phase B completion — B4 + B5. 2 commits.
+
+Phase B B4 — Example 4 reproduction (commit 2aebe92):
+3rd-order, 3-dim hardcoded tensor (paper [8, Example 3.2]):
+A[1,2,2]=A[2,3,3]=A[3,1,1]=1, others=0. Weakly irreducible but NOT
+weakly primitive — paper Figure 3 shows NNI converges, NQZ fails
+(permutation cycle).
+
+Day 15 Octave reference: nit=10, lambda=1.0, Perron=(1/sqrt(3))*[1,1,1].
+
+Toolbox reproduction:
+- nit=6 (MATLAB 10; Python RNG gives more uniform initial vector,
+  faster convergence)
+- lambda = 1.000000000000002 (diff 2.2e-15)
+- Perron vector matches (1/sqrt(3))*[1,1,1] to machine precision
+
+Test asserts (lambda, Perron vector) rather than exact iter count due
+to MATLAB rand() vs np.random.default_rng() RNG difference. Order='F'
+mode-1 unfolding to align with toolbox column-major convention.
+
+Phase B B5 — Example 5 reproduction (commit 54ed7b9):
+9-case Z-tensor Table 2 reproduction. Cyclic edge set
+E = {{i-m+2, ..., i+1}, i=m-1,...,n} (n+1 wraps to 1), Z = D - C + V
+where V = 0.1*rng.uniform(0,1,n) trap potential. NNI runs on
+A = sI - Z (largest eigenpair), smallest eigenvalue of Z recovered
+as mu* = s - rho(A).
+
+New utility: hypergraph_utils.build_paper_ex5_edge_set + build_z_tensor.
+Sparse construction handles m=5/n=100 case (dense would be 10^10 entries
+= 80GB). This is a real toolbox advantage over Octave (Octave couldn't
+test (4,100), (5,*) cases due to memory).
+
+Reproduction outcome (9/9 PASS within ALLOWED_NIT_DIFF=2):
+  (m,n)    paper  got  lambda(A)   min_eig(Z)
+  (3,20)     5     4   3.0404      5.71e-02
+  (3,50)     6     5   3.0447      5.28e-02
+  (3,100)    7     6   3.0506      4.70e-02
+  (4,20)     5     4   4.0403      5.72e-02
+  (4,50)     6     5   4.0444      5.32e-02
+  (4,100)    7     6   4.0498      4.78e-02
+  (5,20)     5     4   5.0403      5.73e-02
+  (5,50)     5     4   5.0443      5.33e-02
+  (5,100)    6     6   5.0495      4.81e-02
+
+Systematic -1 iter offset across 8/9 cases due to RNG difference (V trap
+potential differs between MATLAB rand() and np.random.default_rng()).
+(5,100) coincidentally aligns. Smallest eigenvalues of Z all in 4.7e-2
+to 5.7e-2 range, consistent with v=0.1*rand(n) trap potential scale.
+
+Day 16 collective state:
+- 13 commits across Day 8-16
+- Phase A audit complete (7 sections incl. §7 paper-vs-MATLAB)
+- Phase B B1-B5 all PASS (5/5 paper examples reproduced)
+- 9 parity + 5 paper reproduction = 14 tests green
+- Algorithm code unchanged from Day 12
+
+Memory state: 12 fragility memories.
+
+Day 17 plan options:
+- Phase C: Demo UI integration (paper examples in Streamlit dropdown,
+  ~half day)
+- Phase D: Top-level reproduction report writeup
+  (docs/papers/reproduction_report.md, ~half day)
+- Combined Phase C + D (full day Day 17)
+- paper writing: use paper-vs-MATLAB finding as motivating example
+  for a toolbox-as-3rd-party-verification paper section
+- Different direction entirely
